@@ -241,7 +241,7 @@ func (a *App) StampPDF(pdfPath string, stamps []StampInfo) (string, error) {
 
 		desc := fmt.Sprintf("pos:bl, off:%f %f, scale:%s, rot:0", finalX, finalY, scaleStr)
 
-		runtime.LogInfo(a.ctx, fmt.Sprintf("Backend: Applying stamp %d: %s", i, desc))
+		// Process staving (no log)
 
 		wm, err := api.ImageWatermark(imgTemp.Name(), desc, true, false, types.POINTS)
 		if err != nil {

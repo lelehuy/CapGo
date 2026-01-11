@@ -23,7 +23,7 @@ import {
     Clipboard
 } from 'lucide-react';
 import { SelectFiles, SelectFile, StampPDF, GetFile } from '../wailsjs/go/main/App';
-import { LogInfo } from '../wailsjs/runtime/runtime';
+
 
 interface PdfFileRecord {
     id: string;
@@ -101,6 +101,7 @@ function App() {
             }
         } catch (err) {
             console.error(err);
+            notify('error', `Failed to add files: ${err}`);
         }
     };
 
@@ -152,7 +153,7 @@ function App() {
                 setStampPath(selectedPath);
                 setStampImage(base64);
             } catch (err) {
-                LogInfo(`App: Error loading stamp image: ${err}`);
+                notify('error', `Error loading stamp image: ${err}`);
             }
         }
     };
@@ -198,8 +199,7 @@ function App() {
             });
             return next;
         });
-        LogInfo("App: Synced layout to other files");
-        notify('success', `Layout synced to ${count} files`);
+        notify('info', `Layout synced to ${count} files`);
     };
 
     const doPaste = useCallback(() => {
@@ -217,8 +217,6 @@ function App() {
             return next;
         });
         setActiveStampId(newStamp.id);
-        setClipboardStamp(newStamp);
-        LogInfo(`App: Pasted stamp onto page ${activePage}`);
         notify('success', `Pasted stamp onto page ${activePage}`);
     }, [clipboardStamp, activePdfIndex, activePage, notify]);
 
@@ -232,32 +230,25 @@ function App() {
             // Copy: Cmd+C / Ctrl+C
             if (isMod && (e.key === 'c' || e.code === 'KeyC')) {
                 if (!activeStampId) {
-                    LogInfo("App: Copy failed - No active stamp selected");
                     return;
                 }
                 if (!activePdf) {
-                    LogInfo("App: Copy failed - No active PDF");
                     return;
                 }
 
                 const stamp = activePdf.stamps.find(s => s.id === activeStampId);
                 if (stamp) {
                     setClipboardStamp({ ...stamp });
-                    LogInfo(`App: Copied stamp ${stamp.id}`);
                     notify('info', `Copied: ${stamp.id.substr(0, 4)}...`);
-                } else {
-                    LogInfo(`App: Copy failed - Stamp ${activeStampId} not found in PDF`);
                 }
             }
 
             // Paste: Cmd+V / Ctrl+V
             if (isMod && (e.key === 'v' || e.code === 'KeyV')) {
                 if (!clipboardStamp) {
-                    LogInfo("App: Paste failed - Clipboard is empty");
                     return;
                 }
                 if (activePdfIndex === -1) {
-                    LogInfo("App: Paste failed - No active PDF index");
                     return;
                 }
                 e.preventDefault();
@@ -276,7 +267,6 @@ function App() {
                         return next;
                     });
                     setActiveStampId(null);
-                    LogInfo(`App: Deleted active stamp`);
                     notify('info', 'Stamp deleted');
                 }
             }
@@ -286,11 +276,6 @@ function App() {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [activeStampId, activePdfIndex, clipboardStamp, activePdf, activePage, doPaste, notify]);
 
-    useEffect(() => {
-        if (clipboardStamp) {
-            LogInfo(`App: Clipboard state updated with stamp ${clipboardStamp.id}`);
-        }
-    }, [clipboardStamp]);
 
     const processFile = async (index: number) => {
         const file = pdfFiles[index];
@@ -326,12 +311,10 @@ function App() {
                 next[index].resultPath = finalPath;
                 return next;
             });
-            LogInfo(`App: Finished processing ${file.name}. Result: ${finalPath}`);
             notify('success', `Exported: ${file.name}`);
             return finalPath;
         } catch (err: any) {
             console.error(err);
-            LogInfo(`App: Error processing file: ${err}`);
             setPdfFiles(prev => {
                 const next = [...prev];
                 next[index].status = 'error';
@@ -590,7 +573,6 @@ function App() {
                                                 const stamp = activePdf.stamps.find(s => s.id === activeStampId);
                                                 if (stamp) {
                                                     setClipboardStamp({ ...stamp });
-                                                    LogInfo(`App: UI Copied stamp ${stamp.id}`);
                                                     notify('info', 'Stamp copied to clipboard');
                                                 }
                                             }

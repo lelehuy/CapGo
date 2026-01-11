@@ -2,6 +2,14 @@
 
 **CapGo** is a fast, modern, and cross-platform desktop application designed for stamping and signing PDF documents with ease. Built with Go and React, it provides a seamless experience for professionals who need to apply signatures or official stamps to multiple PDF files quickly and accurately.
 
+## 📥 Download
+
+You can download the latest version of CapGo for macOS directly from the **[Releases](https://github.com/Lelehuy/CapGo/releases)** page.
+
+1.  Download the `CapGo Installer.dmg`.
+2.  Open the file and drag **CapGo** to your **Applications** folder.
+3.  Launch CapGo from your Applications!
+
 ## ✨ Features
 
 - **Drag & Drop Workflow**: Easily import your PDF files and stamp images.
@@ -68,7 +76,7 @@ Your installer will be available in the `Release/` folder.
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
 
 ---
 

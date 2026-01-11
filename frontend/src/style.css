@@ -1,0 +1,12 @@
+/* Reset default Wails styles that conflict with Tailwind */
+html,
+body,
+#app {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background-color: transparent;
+    /* Let Tailwind control bg */
+    text-align: left;
+    /* Reset center alignment */
+}

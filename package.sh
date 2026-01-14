@@ -44,6 +44,14 @@ rm -rf "build/bin/Applications"
 echo "✨ Preparing application bundle..."
 touch "build/bin/$APP_NAME.app"
 
+# Remove quarantine attributes that might cause "damaged" error
+echo "Correction application permissions..."
+xattr -cr "build/bin/$APP_NAME.app"
+
+# Ad-hoc sign the application
+echo "🔑 Signing application (ad-hoc)..."
+codesign --force --deep --sign - "build/bin/$APP_NAME.app"
+
 # 5. Create the DMG
 echo "💿 Creating DMG installer..."
 # Removing --background to avoid Finder corruption. macOS defaults to white anyway.

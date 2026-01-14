@@ -20,6 +20,7 @@ interface CanvasPreviewProps {
     onSelectStamp: (id: string | null) => void;
     onEnvChange: (scale: number, pHeight: number) => void;
     onPageInView: (pageNum: number) => void;
+    onViewportChange: (x: number, y: number) => void;
     jumpToPage?: number | null;
     activePage: number;
 }
@@ -27,11 +28,13 @@ interface CanvasPreviewProps {
 // Sub-component to handle local drag state and prevent parent re-renders (Jitter Fix)
 const DraggableStamp: React.FC<{
     stamp: Stamp;
-    scale: number;
+    layoutScale: number;
+    zoom: number;
     isSelected: boolean;
     onSelect: () => void;
     onUpdate: (s: Stamp) => void;
-}> = ({ stamp, scale, isSelected, onSelect, onUpdate }) => {
+    onDropCommit: (rect: DOMRect, s: Stamp) => void;
+}> = ({ stamp, layoutScale, zoom, isSelected, onSelect, onUpdate, onDropCommit }) => {
     // Local state determines position during drag
     const [pos, setPos] = useState({ x: stamp.x, y: stamp.y });
 
@@ -42,24 +45,24 @@ const DraggableStamp: React.FC<{
 
     return (
         <Rnd
-            size={{ width: stamp.width * scale, height: stamp.height * scale }}
-            position={{ x: pos.x * scale, y: pos.y * scale }}
+            size={{ width: stamp.width * layoutScale, height: stamp.height * layoutScale }}
+            position={{ x: pos.x * layoutScale, y: pos.y * layoutScale }}
+            scale={zoom}
             onDrag={(e, d) => {
                 // Update ONLY local state during drag = 60fps smooth
-                setPos({ x: d.x / scale, y: d.y / scale });
+                setPos({ x: d.x / layoutScale, y: d.y / layoutScale });
             }}
             onDragStop={(e, d) => {
                 // Sync to parent on drop = Data consistency
-                const newX = d.x / scale;
-                const newY = d.y / scale;
-                setPos({ x: newX, y: newY });
-                onUpdate({ ...stamp, x: newX, y: newY });
+                const node = d.node as HTMLElement;
+                const rect = node.getBoundingClientRect();
+                onDropCommit(rect, stamp);
             }}
             onResizeStop={(e, direction, ref, delta, position) => {
-                const newW = parseInt(ref.style.width) / scale;
-                const newH = parseInt(ref.style.height) / scale;
-                const newX = position.x / scale;
-                const newY = position.y / scale;
+                const newW = parseInt(ref.style.width) / layoutScale;
+                const newH = parseInt(ref.style.height) / layoutScale;
+                const newX = position.x / layoutScale;
+                const newY = position.y / layoutScale;
 
                 setPos({ x: newX, y: newY });
                 onUpdate({ ...stamp, width: newW, height: newH, x: newX, y: newY });
@@ -72,7 +75,7 @@ const DraggableStamp: React.FC<{
                 e.stopPropagation();
                 onSelect();
             }}
-            bounds="parent"
+            bounds={undefined} // Allow dragging between pages
             className="z-50 group"
             enableResizing={{
                 top: false, right: false, bottom: false, left: false,
@@ -111,6 +114,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps & { jumpToPage?: number 
     onSelectStamp,
     onEnvChange,
     onPageInView,
+    onViewportChange,
     jumpToPage,
     activePage
 }) => {
@@ -119,6 +123,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps & { jumpToPage?: number 
     const [pageWidth, setPageWidth] = useState<number>(0);
     const [pageHeight, setPageHeight] = useState<number>(0);
     const [containerWidth, setContainerWidth] = useState<number>(0);
+    const [zoom, setZoom] = useState(1.0);
     const [loading, setLoading] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -184,6 +189,84 @@ export const CanvasPreview: React.FC<CanvasPreviewProps & { jumpToPage?: number 
     }, []);
 
     // Intersection Observer to track visible page
+
+
+    const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
+        setNumPages(numPages);
+    };
+
+    const onPageLoadSuccess = (page: any) => {
+        const viewport = page.getViewport({ scale: 1 });
+        LogInfo(`CanvasPreview: Page loaded. Points: ${viewport.width}x${viewport.height}`);
+        setPageWidth(viewport.width);
+        setPageHeight(viewport.height);
+    };
+
+    const scrollToPage = (index: number) => {
+        const pageEl = pageRefs.current[index];
+        if (pageEl) {
+            pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    };
+
+    useEffect(() => {
+        if (typeof jumpToPage === 'number' && jumpToPage > 0 && jumpToPage <= numPages) {
+            scrollToPage(jumpToPage - 1);
+        }
+    }, [jumpToPage, numPages]);
+
+    useEffect(() => {
+        const handleWheel = (e: WheelEvent) => {
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                const container = scrollRef.current;
+                if (!container) return;
+
+                const rect = container.getBoundingClientRect();
+                const offsetX = e.clientX - rect.left;
+                const offsetY = e.clientY - rect.top;
+                const { scrollLeft, scrollTop } = container;
+
+                // Smoother zoom sensitivity
+                const delta = -e.deltaY * 0.002;
+                const newZoom = Math.min(Math.max(zoom + delta, 0.5), 3.0);
+
+                if (newZoom !== zoom) {
+                    const scale = newZoom / zoom;
+                    setZoom(newZoom);
+
+                    // Zoom to mouse cursor position
+                    requestAnimationFrame(() => {
+                        if (container) {
+                            container.scrollLeft = (scrollLeft + offsetX) * scale - offsetX;
+                            container.scrollTop = (scrollTop + offsetY) * scale - offsetY;
+                        }
+                    });
+                }
+            }
+        };
+
+        const container = scrollRef.current;
+        if (container) {
+            container.addEventListener('wheel', handleWheel, { passive: false });
+        }
+        return () => {
+            if (container) {
+                container.removeEventListener('wheel', handleWheel);
+            }
+        };
+    }, [loading, pdfData, zoom]);
+
+    const browserScale = (containerWidth && pageWidth) ? (containerWidth - 64 - 160) / pageWidth : 1;
+    const effectiveScale = browserScale * zoom;
+
+    useEffect(() => {
+        if (pageHeight > 0) {
+            onEnvChange(effectiveScale, pageHeight);
+        }
+    }, [pageHeight, effectiveScale, onEnvChange]);
+
+    // Intersection Observer to track visible page
     useEffect(() => {
         if (!numPages || !scrollRef.current) return;
 
@@ -212,43 +295,113 @@ export const CanvasPreview: React.FC<CanvasPreviewProps & { jumpToPage?: number 
         return () => observer.disconnect();
     }, [numPages, onPageInView, pdfPath]);
 
-    const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
-        setNumPages(numPages);
-    };
-
-    const onPageLoadSuccess = (page: any) => {
-        const viewport = page.getViewport({ scale: 1 });
-        LogInfo(`CanvasPreview: Page loaded. Points: ${viewport.width}x${viewport.height}`);
-        setPageWidth(viewport.width);
-        setPageHeight(viewport.height);
-    };
-
-    const browserScale = (containerWidth && pageWidth) ? (containerWidth - 64 - 160) / pageWidth : 1;
-
+    // Track Viewport Center for Stamp Placement
     useEffect(() => {
-        if (pageHeight > 0) {
-            onEnvChange(browserScale, pageHeight);
-        }
-    }, [pageHeight, browserScale, onEnvChange]);
+        const handleScroll = () => {
+            if (!scrollRef.current || activePage <= 0) return;
+            const pageEl = pageRefs.current[activePage - 1];
+            if (!pageEl) return;
 
-    useEffect(() => {
-        if (typeof jumpToPage === 'number' && jumpToPage > 0 && jumpToPage <= numPages) {
-            const pageEl = pageRefs.current[jumpToPage - 1];
-            if (pageEl) {
-                pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-        }
-    }, [jumpToPage, numPages]);
+            const containerRect = scrollRef.current.getBoundingClientRect();
+            const pageRect = pageEl.getBoundingClientRect();
 
-    const scrollToPage = (index: number) => {
-        const pageEl = pageRefs.current[index];
-        if (pageEl) {
-            pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            // Center of the container
+            const cx = containerRect.left + containerRect.width / 2;
+            const cy = containerRect.top + containerRect.height / 2;
+
+            // Offset of center relative to the page top-left
+            const offsetX = cx - pageRect.left;
+            const offsetY = cy - pageRect.top;
+
+            // Convert to PDF coordinates
+            // effectiveScale = browserScale * zoom
+            const pdfX = offsetX / effectiveScale;
+            const pdfY = offsetY / effectiveScale;
+
+            onViewportChange(pdfX, pdfY);
+        };
+
+        const container = scrollRef.current;
+        if (container) {
+            container.addEventListener('scroll', handleScroll, { passive: true });
+            handleScroll();
+        }
+
+        return () => {
+            if (container) container.removeEventListener('scroll', handleScroll);
+        };
+    }, [activePage, effectiveScale, onViewportChange]);
+
+    const handleStampDrop = (rect: DOMRect, stamp: Stamp) => {
+        // Find which page is under the center of the dropped stamp
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+
+        // Use elementsFromPoint to find the page container
+        const elements = document.elementsFromPoint(cx, cy);
+        const targetPageDiv = elements.find(el => el.hasAttribute('data-page-index'));
+
+        if (targetPageDiv) {
+            const pageIndex = parseInt(targetPageDiv.getAttribute('data-page-index') || '0');
+            const targetPageNum = pageIndex + 1;
+            const targetRect = targetPageDiv.getBoundingClientRect();
+
+            // Calculate new X, Y relative to the TARGET page
+            // We use layoutScale because that defines the unzoomed Page coordinate system
+            // rect.left is screen coordinate. targetRect.left is screen coordinate.
+            // Difference is screen pixels.
+            // We need to divide by (layoutScale * zoom) to get PDF Points?
+            // Wait, DraggableStamp uses `width * layoutScale`. And `scale={zoom}`.
+            // So visual size = width * layoutScale * zoom.
+            // Visual diff = (x * layoutScale * zoom).
+            // So x = visualDiff / (layoutScale * zoom).
+
+            // However, we used CSS Zoom on the container.
+            // The `targetRect` is affected by CSS Zoom?
+            // Yes, getBoundingClientRect returns actual screen pixels.
+            // So `targetRect` is zoomed. `rect` (stamp) is zoomed.
+            // So `diff` is zoomed pixels.
+            // We need to divide by `zoom` to get "Layout Pixels" (unzoomed screen pixels).
+            // Then divide by `layoutScale` to get PDF Points.
+
+            // Wait, does CSS Zoom affect getBoundingClientRect?
+            // Yes.
+            // So:
+            // diffScreen = rect.left - targetRect.left
+            // diffLayout = diffScreen / zoom
+            // diffPdf = diffLayout / browserScale
+
+            const diffX = rect.left - targetRect.left;
+            const diffY = rect.top - targetRect.top;
+
+            // Derive scale from actual DOM to ensure precision regardless of zoom state
+            // targetRect.width = Visual width (zoomed and scaled)
+            // pageWidth = Original PDF Point width
+            const currentScale = targetRect.width / pageWidth;
+
+            const newX = diffX / currentScale;
+            const newY = diffY / currentScale;
+
+            onUpdateStamp({
+                ...stamp,
+                pageNum: targetPageNum,
+                x: newX,
+                y: newY
+            });
         }
     };
+
+
+
+    // ...
 
     return (
         <div ref={containerRef} className="flex h-full w-full bg-zinc-950 rounded-2xl overflow-hidden border border-zinc-900 shadow-2xl relative">
+            {/* Zoom Indicator */}
+            <div className="absolute z-20 bottom-6 left-12 bg-zinc-900/80 backdrop-blur border border-zinc-800 px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-zinc-400 select-none shadow-xl pointer-events-none">
+                {Math.round(zoom * 100)}%
+            </div>
+
             {loading ? (
                 <div className="flex-1 flex flex-col items-center justify-center gap-4 text-zinc-500">
                     <Loader2 className="animate-spin text-indigo-500" size={40} />
@@ -259,47 +412,51 @@ export const CanvasPreview: React.FC<CanvasPreviewProps & { jumpToPage?: number 
                     {/* Main Preview (Left) */}
                     <div
                         ref={scrollRef}
-                        className="flex-1 overflow-y-auto p-12 flex flex-col items-center gap-16 custom-scrollbar scroll-smooth bg-[#080808] shadow-inner"
+                        className="flex-1 overflow-auto overscroll-none p-12 flex flex-col items-start gap-16 custom-scrollbar scroll-smooth bg-[#080808] shadow-inner"
                         onClick={() => onSelectStamp(null)}
                     >
-                        <Document
-                            file={pdfData}
-                            onLoadSuccess={onDocumentLoadSuccess}
-                            className="flex flex-col items-center gap-16"
-                            loading={null}
-                        >
-                            {Array.from(new Array(numPages), (el, index) => (
-                                <div
-                                    key={`page_${index + 1}`}
-                                    ref={el => pageRefs.current[index] = el}
-                                    data-page-index={index}
-                                    className="relative shadow-[0_45px_100px_-20px_rgba(0,0,0,0.8)] bg-white w-fit mx-auto transition-all duration-500 hover:scale-[1.01]"
-                                >
-                                    <Page
-                                        pageNumber={index + 1}
-                                        width={pageWidth > 0 ? pageWidth * browserScale : 600}
-                                        onLoadSuccess={index === 0 ? onPageLoadSuccess : undefined}
-                                        renderAnnotationLayer={false}
-                                        renderTextLayer={false}
-                                        loading={null}
-                                        className="block"
-                                    />
-                                    {/* Draggable Stamps FILTERED BY PAGE */}
-                                    {pageWidth > 0 && stamps.filter(s => s.pageNum === index + 1).map(stamp => (
-                                        <DraggableStamp
-                                            key={stamp.id}
-                                            stamp={stamp}
-                                            scale={browserScale}
-                                            isSelected={stamp.id === activeStampId}
-                                            onSelect={() => onSelectStamp(stamp.id)}
-                                            onUpdate={onUpdateStamp}
+                        <div className="mx-auto" style={{ zoom: zoom }}>
+                            <Document
+                                file={pdfData}
+                                onLoadSuccess={onDocumentLoadSuccess}
+                                className="flex flex-col items-center gap-16"
+                                loading={null}
+                            >
+                                {Array.from(new Array(numPages), (el, index) => (
+                                    <div
+                                        key={`page_${index + 1}`}
+                                        ref={el => pageRefs.current[index] = el}
+                                        data-page-index={index}
+                                        // Removed transform: scale(zoom) as we use CSS zoom on container
+                                        className="relative shadow-[0_45px_100px_-20px_rgba(0,0,0,0.8)] bg-white w-fit mx-auto transition-transform duration-75"
+                                    >
+                                        <Page
+                                            pageNumber={index + 1}
+                                            width={pageWidth > 0 ? pageWidth * browserScale : 600}
+                                            onLoadSuccess={index === 0 ? onPageLoadSuccess : undefined}
+                                            renderAnnotationLayer={false}
+                                            renderTextLayer={false}
+                                            loading={null}
+                                            className="block"
                                         />
-                                    ))}
-                                </div>
-                            ))}
-                        </Document>
+                                        {/* Draggable Stamps */}
+                                        {pageWidth > 0 && stamps.filter(s => s.pageNum === index + 1).map(stamp => (
+                                            <DraggableStamp
+                                                key={stamp.id}
+                                                stamp={stamp}
+                                                layoutScale={browserScale}
+                                                zoom={zoom}
+                                                isSelected={stamp.id === activeStampId}
+                                                onSelect={() => onSelectStamp(stamp.id)}
+                                                onUpdate={onUpdateStamp}
+                                                onDropCommit={handleStampDrop}
+                                            />
+                                        ))}
+                                    </div>
+                                ))}
+                            </Document>
+                        </div>
                     </div>
-
                     {/* Page Thumbnails Sidebar (Right - Robust Highlight) */}
                     <aside className="w-40 border-l border-zinc-900 bg-zinc-950 flex flex-col overflow-hidden shrink-0">
                         <div className="p-4 border-b border-zinc-900 bg-zinc-950/50 backdrop-blur-md">

@@ -24,7 +24,7 @@ import {
     Upload
 } from 'lucide-react';
 import { SelectFiles, SelectFile, StampPDF, GetFile } from '../wailsjs/go/main/App';
-import { OnFileDrop, OnFileDropOff } from '../wailsjs/runtime/runtime';
+import { OnFileDrop, OnFileDropOff, LogInfo } from '../wailsjs/runtime/runtime';
 
 
 interface PdfFileRecord {
@@ -90,12 +90,40 @@ function App() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [isDraggingFile, setIsDraggingFile] = useState(false);
+    const [viewportCenter, setViewportCenter] = useState({ x: 0, y: 0 });
 
     const activePdf = activePdfIndex >= 0 ? pdfFiles[activePdfIndex] : null;
 
     const handleFilesAdded = useCallback((paths: string[]) => {
         if (!paths || paths.length === 0) return;
-        const newRecords: PdfFileRecord[] = paths.map((p: string) => ({
+
+        // Check for duplicates
+        const duplicates: string[] = [];
+        const newPaths: string[] = [];
+
+        paths.forEach(p => {
+            // Check if path already exists in current list
+            if (pdfFiles.some(f => f.path === p)) {
+                duplicates.push(p);
+            } else {
+                newPaths.push(p);
+            }
+        });
+
+        // Notify about duplicates
+        if (duplicates.length > 0) {
+            const name = duplicates[0].split(/[\\/]/).pop();
+            // If we are adding just one file and it's duplicate
+            if (duplicates.length === 1 && newPaths.length === 0) {
+                notify('info', `File already open: ${name}`);
+            } else {
+                notify('info', `Skipped ${duplicates.length} duplicate file(s)`);
+            }
+        }
+
+        if (newPaths.length === 0) return;
+
+        const newRecords: PdfFileRecord[] = newPaths.map((p: string) => ({
             id: Math.random().toString(36).substr(2, 9),
             name: p.split(/[\\/]/).pop() || 'document.pdf',
             path: p,
@@ -103,18 +131,19 @@ function App() {
             stamps: [],
             selected: true
         }));
-        setPdfFiles(prev => [...prev, ...newRecords]);
 
-        // Use a functional update or refer to the current length to correctly set active index
         setPdfFiles(prev => {
-            if (activePdfIndex === -1 && prev.length > 0) {
-                setActivePdfIndex(0);
-            }
-            return prev;
+            const next = [...prev, ...newRecords];
+            return next;
         });
 
-        notify('success', `Added ${paths.length} file(s)`);
-    }, [activePdfIndex, notify]);
+        // Set active index if it was the first file added
+        if (activePdfIndex === -1 && newPaths.length > 0) {
+            setActivePdfIndex(0);
+        }
+
+        notify('success', `Added ${newPaths.length} file(s)`);
+    }, [pdfFiles, activePdfIndex, notify]);
 
     const handleSelectFiles = async () => {
         try {
@@ -131,10 +160,10 @@ function App() {
         const newStamp: Stamp = {
             id: Math.random().toString(36).substr(2, 9),
             image: imgUrl,
-            x: 50,
-            y: 50,
-            width: 150,
-            height: 80,
+            x: viewportCenter.x > 0 ? viewportCenter.x : 50,
+            y: viewportCenter.y > 0 ? viewportCenter.y : 50,
+            width: 150 * 0.7, // Slightly smaller default
+            height: 80 * 0.7,
             pageNum: activePage
         };
 
@@ -194,34 +223,13 @@ function App() {
         setPageHeight(pHeight);
     }, []);
 
-    const applyActiveToAll = () => {
-        if (!activePdf) return;
+    const handleViewportChange = useCallback((x: number, y: number) => {
+        // Debounce or just set it? React batching should handle 60fps ok if simple.
+        // Actually, we should probably check if meaningful change?
+        setViewportCenter({ x, y });
+    }, []);
 
-        const count = pdfFiles.length - 1;
-        if (count <= 0) {
-            notify('info', "No other files to sync to.");
-            return;
-        }
 
-        const confirmSync = window.confirm(`Copy these ${activePdf.stamps.length} stamps to all other ${count} files? This will overwrite existing stamps on those files.`);
-        if (!confirmSync) return;
-
-        const layoutRef = activePdf.stamps;
-        setPdfFiles(prev => {
-            const next = prev.map((f, idx) => {
-                if (idx === activePdfIndex) return f;
-                return {
-                    ...f,
-                    stamps: layoutRef.map(s => ({
-                        ...s,
-                        id: Math.random().toString(36).substr(2, 9)
-                    }))
-                };
-            });
-            return next;
-        });
-        notify('info', `Layout synced to ${count} files`);
-    };
 
     const doPaste = useCallback(() => {
         if (!clipboardStamp || activePdfIndex === -1) return;
@@ -326,18 +334,20 @@ function App() {
         // Use Wails runtime for reliable file path extraction
         OnFileDrop((x, y, paths) => {
             setIsDraggingFile(false);
-            console.log("Dropped paths:", paths);
+
+            LogInfo(`[Frontend] OnFileDrop triggered. Paths: ${JSON.stringify(paths)}`);
 
             // Normalize paths: trim whitespace and check extension
             const pdfPaths = paths.filter(p => p && p.trim().toLowerCase().endsWith('.pdf'));
 
             if (pdfPaths.length > 0) {
+                LogInfo(`[Frontend] Accepted ${pdfPaths.length} PDF files`);
                 handleFilesAdded(pdfPaths);
             } else if (paths.length > 0) {
-                // Show diagnostic info for the first rejected file
                 const firstFile = paths[0];
-                const ext = firstFile.split('.').pop() || 'no-ext';
-                notify('error', `Only PDF files are supported. Detected: ${firstFile.split(/[/\\]/).pop()} (${ext})`);
+                const ext = firstFile ? (firstFile.split('.').pop() || 'no-ext') : 'unknown';
+                LogInfo(`[Frontend] Rejected: ${firstFile} (${ext})`);
+                notify('error', `Only PDF files are supported. Detected: ${firstFile ? firstFile.split(/[/\\]/).pop() : 'Unknown'} (${ext})`);
             }
         }, false);
 
@@ -704,14 +714,7 @@ function App() {
                     </div>
 
                     <div className="flex items-center gap-3">
-                        {pdfFiles.length > 1 && (
-                            <button
-                                onClick={applyActiveToAll}
-                                className="px-4 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 text-[10px] font-bold text-zinc-400 hover:text-white flex items-center gap-2 transition-all shadow-md active:scale-[0.98]"
-                            >
-                                <Copy size={12} /> SYNC ALL LAYOUTS
-                            </button>
-                        )}
+
                         {stampImage && (
                             <div className="h-8 w-8 bg-zinc-900 rounded-lg p-1.5 border border-zinc-800 overflow-hidden ring-1 ring-zinc-700">
                                 <img src={stampImage} className="w-full h-full object-contain invert" alt="Stamp" />
@@ -732,6 +735,7 @@ function App() {
                                 onSelectStamp={setActiveStampId}
                                 onEnvChange={handleCanvasEnvChange}
                                 onPageInView={setActivePage}
+                                onViewportChange={handleViewportChange}
                                 activePage={activePage}
                                 jumpToPage={jumpToPage}
                             />

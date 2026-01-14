@@ -22,6 +22,28 @@ export namespace main {
 	        this.pageNum = source["pageNum"];
 	    }
 	}
+	export class UpdateResult {
+	    updateAvailable: boolean;
+	    latestVersion: string;
+	    releaseUrl: string;
+	    releaseNotes: string;
+	    currentVersion: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.updateAvailable = source["updateAvailable"];
+	        this.latestVersion = source["latestVersion"];
+	        this.releaseUrl = source["releaseUrl"];
+	        this.releaseNotes = source["releaseNotes"];
+	        this.currentVersion = source["currentVersion"];
+	        this.error = source["error"];
+	    }
+	}
 
 }
 

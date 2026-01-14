@@ -24,6 +24,7 @@ import {
     Upload
 } from 'lucide-react';
 import { SelectFiles, SelectFile, StampPDF, GetFile } from '../wailsjs/go/main/App';
+import { OnFileDrop, OnFileDropOff } from '../wailsjs/runtime/runtime';
 
 
 interface PdfFileRecord {
@@ -309,37 +310,46 @@ function App() {
         const handleDragLeave = (e: DragEvent) => {
             e.preventDefault();
             e.stopPropagation();
-            setIsDraggingFile(false);
-        };
-
-        const handleDrop = async (e: DragEvent) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setIsDraggingFile(false);
-
-            if (e.dataTransfer?.files) {
-                const files = Array.from(e.dataTransfer.files);
-                const pdfPaths = files
-                    .filter(f => f.name.toLowerCase().endsWith('.pdf'))
-                    // In Wails, webview files have a 'path' property if from the OS
-                    .map(f => (f as any).path)
-                    .filter(p => !!p);
-
-                if (pdfPaths.length > 0) {
-                    handleFilesAdded(pdfPaths);
-                } else if (files.length > 0) {
-                    notify('error', 'Only PDF files are supported for drag and drop');
-                }
+            // Check if we're actually leaving the window or just entering a child element
+            if (e.relatedTarget === null || (e.relatedTarget as HTMLElement).nodeName === 'HTML') {
+                setIsDraggingFile(false);
             }
         };
 
+        // Prevent default browser behavior for dropped files
+        const handleWindowDrop = (e: DragEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDraggingFile(false);
+        };
+
+        // Use Wails runtime for reliable file path extraction
+        OnFileDrop((x, y, paths) => {
+            setIsDraggingFile(false);
+            console.log("Dropped paths:", paths);
+
+            // Normalize paths: trim whitespace and check extension
+            const pdfPaths = paths.filter(p => p && p.trim().toLowerCase().endsWith('.pdf'));
+
+            if (pdfPaths.length > 0) {
+                handleFilesAdded(pdfPaths);
+            } else if (paths.length > 0) {
+                // Show diagnostic info for the first rejected file
+                const firstFile = paths[0];
+                const ext = firstFile.split('.').pop() || 'no-ext';
+                notify('error', `Only PDF files are supported. Detected: ${firstFile.split(/[/\\]/).pop()} (${ext})`);
+            }
+        }, false);
+
         window.addEventListener('dragover', handleDragOver);
         window.addEventListener('dragleave', handleDragLeave);
-        window.addEventListener('drop', handleDrop);
+        window.addEventListener('drop', handleWindowDrop);
+
         return () => {
             window.removeEventListener('dragover', handleDragOver);
             window.removeEventListener('dragleave', handleDragLeave);
-            window.removeEventListener('drop', handleDrop);
+            window.removeEventListener('drop', handleWindowDrop);
+            OnFileDropOff();
         };
     }, [handleFilesAdded, notify]);
 
@@ -450,14 +460,35 @@ function App() {
         setActiveStampId(null);
     };
 
+    const [showAbout, setShowAbout] = useState(false);
+    const [updateResult, setUpdateResult] = useState<any>(null);
+    const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+
+    const handleCheckUpdate = async () => {
+        setIsCheckingUpdate(true);
+        setUpdateResult(null);
+        try {
+            // @ts-ignore
+            const result = await window.go.main.App.CheckForUpdates();
+            setUpdateResult(result);
+        } catch (err) {
+            console.error(err);
+            setUpdateResult({ error: "Failed to check for updates" });
+        } finally {
+            setIsCheckingUpdate(false);
+        }
+    };
+
     return (
         <div className="flex h-screen w-full bg-[#050505] text-white font-sans selection:bg-indigo-500/30">
             {/* Left Main Sidebar */}
-            {/* Left Main Sidebar */}
             <aside className="w-16 border-r border-zinc-900 bg-[#080808] flex flex-col items-center py-6 gap-8 shrink-0">
-                <div className="w-10 h-10 bg-zinc-900/50 rounded-xl flex items-center justify-center border border-zinc-800">
-                    <Layers size={20} className="text-zinc-500" />
-                </div>
+                <button
+                    onClick={() => setShowAbout(true)}
+                    className="w-10 h-10 bg-zinc-900/50 rounded-xl flex items-center justify-center border border-zinc-800 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-all cursor-pointer group"
+                >
+                    <img src={logo} className="w-6 h-6 object-contain opacity-70 group-hover:opacity-100 transition-opacity" alt="Logo" />
+                </button>
                 <nav className="flex flex-col gap-6">
                     <button onClick={() => setIsDrawing(true)} className="p-2.5 rounded-xl hover:bg-zinc-900 text-zinc-500 hover:text-indigo-400 transition-all group relative">
                         <PenTool size={20} />
@@ -719,6 +750,75 @@ function App() {
                 </section>
 
             </main>
+
+            {/* About Modal */}
+            {showAbout && (
+                <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-8 animate-in fade-in duration-300">
+                    <div className="bg-zinc-950 border border-zinc-900 rounded-3xl p-10 w-full max-w-md shadow-2xl relative overflow-hidden flex flex-col items-center text-center">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-500"></div>
+
+                        <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center shadow-lg overflow-hidden border border-white/10 mb-6">
+                            <img src={logo} className="w-[85%] h-[85%] object-contain" alt="Logo" />
+                        </div>
+
+                        <h2 className="text-2xl font-black uppercase tracking-widest text-white mb-1">CapGo</h2>
+                        <p className="text-zinc-500 text-xs font-mono mb-8">Version 1.0.4-production</p>
+
+                        {!updateResult ? (
+                            <button
+                                onClick={handleCheckUpdate}
+                                disabled={isCheckingUpdate}
+                                className="px-6 py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-xl text-xs font-bold transition-all flex items-center gap-2 group"
+                            >
+                                {isCheckingUpdate ? <Loader2 size={14} className="animate-spin text-zinc-400" /> : <Download size={14} className="text-zinc-400 group-hover:text-emerald-400" />}
+                                {isCheckingUpdate ? 'CHECKING...' : 'CHECK FOR UPDATES'}
+                            </button>
+                        ) : (
+                            <div className="w-full bg-zinc-900/50 rounded-xl p-4 border border-zinc-800 text-left">
+                                {updateResult.error ? (
+                                    <div className="flex items-center gap-2 text-red-400 text-xs font-bold">
+                                        <AlertCircle size={14} />
+                                        <span>{updateResult.error}</span>
+                                    </div>
+                                ) : updateResult.updateAvailable ? (
+                                    <div className="space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-emerald-400 text-xs font-bold uppercase">New Update Available!</span>
+                                            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] font-mono rounded">{updateResult.latestVersion}</span>
+                                        </div>
+                                        <div className="text-[10px] text-zinc-500 max-h-32 overflow-y-auto w-full custom-scrollbar bg-black/20 p-2 rounded">
+                                            <p className="font-bold mb-1">Release Notes:</p>
+                                            <pre className="whitespace-pre-wrap font-sans">{updateResult.releaseNotes}</pre>
+                                        </div>
+                                        <button
+                                            onClick={() => (window as any).go.main.App.BrowserOpenURL(updateResult.releaseUrl)}
+                                            className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2"
+                                        >
+                                            <Download size={12} /> UPDATE NOW
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center gap-2 py-2">
+                                        <CheckCircle2 size={24} className="text-emerald-500" />
+                                        <span className="text-zinc-400 text-xs font-medium">You are using the latest version.</span>
+                                        <span className="text-zinc-600 text-[10px] font-mono">Current: {updateResult.currentVersion}</span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        <div className="mt-8 pt-6 border-t border-zinc-900 w-full flex justify-between items-center">
+                            <p className="text-[10px] text-zinc-600">© 2026 LeleHuy. All rights reserved.</p>
+                            <button
+                                onClick={() => setShowAbout(false)}
+                                className="text-zinc-500 hover:text-white text-[10px] font-bold uppercase tracking-wider transition-colors"
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Sign Modal */}
             {isDrawing && (

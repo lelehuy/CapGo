@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/png"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -258,4 +260,60 @@ func (a *App) StampPDF(pdfPath string, stamps []StampInfo) (string, error) {
 	}
 
 	return outputPath, nil
+}
+
+// Release represents a GitHub release
+type Release struct {
+	TagName string `json:"tag_name"`
+	HtmlUrl string `json:"html_url"`
+	Body    string `json:"body"`
+}
+
+// UpdateResult contains the update check information
+type UpdateResult struct {
+	UpdateAvailable bool   `json:"updateAvailable"`
+	LatestVersion   string `json:"latestVersion"`
+	ReleaseUrl      string `json:"releaseUrl"`
+	ReleaseNotes    string `json:"releaseNotes"`
+	CurrentVersion  string `json:"currentVersion"`
+	Error           string `json:"error,omitempty"`
+}
+
+const CurrentAppVersion = "v1.0.4"
+
+// CheckForUpdates checks the GitHub repo for a newer version
+func (a *App) CheckForUpdates() UpdateResult {
+	resp, err := http.Get("https://api.github.com/repos/lelehuy/CapGo/releases/latest")
+	if err != nil {
+		return UpdateResult{Error: fmt.Sprintf("Network error: %v", err), CurrentVersion: CurrentAppVersion}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return UpdateResult{Error: "Failed to fetch release info", CurrentVersion: CurrentAppVersion}
+	}
+
+	var release Release
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return UpdateResult{Error: "Failed to parse release info", CurrentVersion: CurrentAppVersion}
+	}
+
+	// Simple version comparison (assumes tags are like "v1.0.4")
+	// If the tags differ, we assume it's an update (or at least a difference)
+	// For production, use a semver library.
+	if release.TagName != CurrentAppVersion {
+		return UpdateResult{
+			UpdateAvailable: true,
+			LatestVersion:   release.TagName,
+			ReleaseUrl:      release.HtmlUrl,
+			ReleaseNotes:    release.Body,
+			CurrentVersion:  CurrentAppVersion,
+		}
+	}
+
+	return UpdateResult{
+		UpdateAvailable: false,
+		LatestVersion:   release.TagName,
+		CurrentVersion:  CurrentAppVersion,
+	}
 }

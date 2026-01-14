@@ -74,21 +74,26 @@ const DraggableStamp: React.FC<{
             }}
             bounds="parent"
             className="z-50 group"
-            dragHandleClassName="drag-handle"
+            enableResizing={{
+                top: false, right: false, bottom: false, left: false,
+                topRight: false, bottomRight: true, bottomLeft: false, topLeft: false
+            }}
         >
-            <div className={`relative w-full h-full border-2 rounded transition-colors backdrop-blur-[0.5px] ${isSelected ? 'border-indigo-500 bg-indigo-500/10' : 'border-transparent hover:border-indigo-500/30'}`}>
+            <div className={`relative w-full h-full border-2 rounded transition-colors backdrop-blur-[0.5px] cursor-move ${isSelected ? 'border-indigo-500 bg-indigo-500/10' : 'border-transparent hover:border-indigo-500/30'}`}>
                 <img
                     src={stamp.image}
-                    className="w-full h-full object-contain pointer-events-none"
+                    className="w-full h-full object-contain pointer-events-none select-none"
                     alt="Stamp"
                 />
 
-                {/* Drag Handles */}
+                {/* Interaction Indicators */}
                 <div className={`transition-opacity duration-200 ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                    <div className="drag-handle absolute -top-3 -left-3 w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center cursor-move shadow-lg text-white">
+                    {/* Top-left move indicator (Visual only now, whole area is draggable) */}
+                    <div className="absolute -top-3 -left-3 w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center shadow-lg text-white pointer-events-none">
                         <Move size={12} />
                     </div>
-                    <div className="absolute -bottom-3 -right-3 w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center cursor-nwse-resize shadow-lg text-white">
+                    {/* Bottom-right resize handle */}
+                    <div className="absolute -bottom-3 -right-3 w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center shadow-lg text-white cursor-nwse-resize hover:scale-110 transition-transform">
                         <Maximize2 size={12} />
                     </div>
                 </div>
@@ -125,10 +130,17 @@ export const CanvasPreview: React.FC<CanvasPreviewProps & { jumpToPage?: number 
         const loadPdf = async () => {
             if (!pdfPath) {
                 setPdfData(null);
+                setNumPages(0);
+                setPageWidth(0);
+                setPageHeight(0);
                 return;
             }
             LogInfo(`CanvasPreview: loadPdf ${pdfPath}`);
             setLoading(true);
+            // Reset dimensions before loading new one
+            setNumPages(0);
+            setPageWidth(0);
+            setPageHeight(0);
             try {
                 const data: any = await GetFile(pdfPath);
                 let bytes: Uint8Array | null = null;

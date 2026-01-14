@@ -65,6 +65,12 @@ function App() {
     const [jumpToPage, setJumpToPage] = useState<number | null>(null);
     const [activePage, setActivePage] = useState<number>(1);
 
+    // Reset page to 1 when switching PDF files
+    useEffect(() => {
+        setActivePage(1);
+        setActiveStampId(null);
+    }, [activePdfIndex]);
+
     // Notifications
     const [notifications, setNotifications] = useState<Toast[]>([]);
 

@@ -812,7 +812,7 @@ function App() {
                         )}
 
                         <div className="mt-8 pt-6 border-t border-zinc-900 w-full flex justify-between items-center">
-                            <p className="text-[10px] text-zinc-600">© 2026 LeleHuy. All rights reserved.</p>
+                            <p className="text-[10px] text-zinc-600">© 2026 leh. All rights reserved.</p>
                             <button
                                 onClick={() => setShowAbout(false)}
                                 className="text-zinc-500 hover:text-white text-[10px] font-bold uppercase tracking-wider transition-colors"

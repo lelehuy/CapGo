@@ -20,7 +20,8 @@ import {
     Play,
     AlertCircle,
     Info,
-    Clipboard
+    Clipboard,
+    Upload
 } from 'lucide-react';
 import { SelectFiles, SelectFile, StampPDF, GetFile } from '../wailsjs/go/main/App';
 
@@ -87,24 +88,37 @@ function App() {
 
     const [isProcessing, setIsProcessing] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
+    const [isDraggingFile, setIsDraggingFile] = useState(false);
 
     const activePdf = activePdfIndex >= 0 ? pdfFiles[activePdfIndex] : null;
+
+    const handleFilesAdded = useCallback((paths: string[]) => {
+        if (!paths || paths.length === 0) return;
+        const newRecords: PdfFileRecord[] = paths.map((p: string) => ({
+            id: Math.random().toString(36).substr(2, 9),
+            name: p.split(/[\\/]/).pop() || 'document.pdf',
+            path: p,
+            status: 'pending',
+            stamps: [],
+            selected: true
+        }));
+        setPdfFiles(prev => [...prev, ...newRecords]);
+
+        // Use a functional update or refer to the current length to correctly set active index
+        setPdfFiles(prev => {
+            if (activePdfIndex === -1 && prev.length > 0) {
+                setActivePdfIndex(0);
+            }
+            return prev;
+        });
+
+        notify('success', `Added ${paths.length} file(s)`);
+    }, [activePdfIndex, notify]);
 
     const handleSelectFiles = async () => {
         try {
             const paths = await SelectFiles("PDF Files (*.pdf)", "*.pdf");
-            if (paths && paths.length > 0) {
-                const newRecords: PdfFileRecord[] = paths.map((p: string) => ({
-                    id: Math.random().toString(36).substr(2, 9),
-                    name: p.split(/[\\/]/).pop() || 'document.pdf',
-                    path: p,
-                    status: 'pending',
-                    stamps: [],
-                    selected: true
-                }));
-                setPdfFiles(prev => [...prev, ...newRecords]);
-                if (activePdfIndex === -1) setActivePdfIndex(0);
-            }
+            handleFilesAdded(paths);
         } catch (err) {
             console.error(err);
             notify('error', `Failed to add files: ${err}`);
@@ -281,6 +295,53 @@ function App() {
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [activeStampId, activePdfIndex, clipboardStamp, activePdf, activePage, doPaste, notify]);
+
+    // Handle Global File Drag and Drop
+    useEffect(() => {
+        const handleDragOver = (e: DragEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.dataTransfer?.types.includes('Files')) {
+                setIsDraggingFile(true);
+            }
+        };
+
+        const handleDragLeave = (e: DragEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDraggingFile(false);
+        };
+
+        const handleDrop = async (e: DragEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDraggingFile(false);
+
+            if (e.dataTransfer?.files) {
+                const files = Array.from(e.dataTransfer.files);
+                const pdfPaths = files
+                    .filter(f => f.name.toLowerCase().endsWith('.pdf'))
+                    // In Wails, webview files have a 'path' property if from the OS
+                    .map(f => (f as any).path)
+                    .filter(p => !!p);
+
+                if (pdfPaths.length > 0) {
+                    handleFilesAdded(pdfPaths);
+                } else if (files.length > 0) {
+                    notify('error', 'Only PDF files are supported for drag and drop');
+                }
+            }
+        };
+
+        window.addEventListener('dragover', handleDragOver);
+        window.addEventListener('dragleave', handleDragLeave);
+        window.addEventListener('drop', handleDrop);
+        return () => {
+            window.removeEventListener('dragover', handleDragOver);
+            window.removeEventListener('dragleave', handleDragLeave);
+            window.removeEventListener('drop', handleDrop);
+        };
+    }, [handleFilesAdded, notify]);
 
 
     const processFile = async (index: number) => {
@@ -742,6 +803,16 @@ function App() {
                     </div>
                 ))}
             </div>
+            {/* Drag and Drop Overlay */}
+            {isDraggingFile && (
+                <div className="fixed inset-0 z-[300] bg-indigo-600/20 backdrop-blur-sm border-4 border-dashed border-indigo-500 m-4 rounded-3xl flex flex-col items-center justify-center animate-in fade-in duration-200 pointer-events-none">
+                    <div className="bg-zinc-950 p-8 rounded-full shadow-2xl mb-6">
+                        <Upload size={48} className="text-indigo-400 animate-bounce" />
+                    </div>
+                    <h2 className="text-3xl font-black text-white uppercase tracking-widest">Drop PDF Files</h2>
+                    <p className="text-indigo-300 font-bold mt-2 uppercase tracking-tighter">Add to your workspace</p>
+                </div>
+            )}
         </div>
     );
 }

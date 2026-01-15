@@ -262,6 +262,26 @@ func (a *App) StampPDF(pdfPath string, stamps []StampInfo) (string, error) {
 	return outputPath, nil
 }
 
+// UpdatePDFPages creates a new PDF with the specified sequence of pages from the source PDF
+func (a *App) UpdatePDFPages(pdfPath string, pages []string) (string, error) {
+	pdfPath = filepath.Clean(pdfPath)
+	// Create a unique temp file name to avoid collisions
+	tempDir := os.TempDir()
+	outputPath := filepath.Join(tempDir, fmt.Sprintf("capgo_mod_%d_%s", os.Getpid(), filepath.Base(pdfPath)))
+
+	// Ensure we don't overwrite if it somehow exists
+	if _, err := os.Stat(outputPath); err == nil {
+		os.Remove(outputPath)
+	}
+
+	err := api.CollectFile(pdfPath, outputPath, pages, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to collect pages: %v", err)
+	}
+
+	return outputPath, nil
+}
+
 // Release represents a GitHub release
 type Release struct {
 	TagName string `json:"tag_name"`
@@ -316,4 +336,9 @@ func (a *App) CheckForUpdates() UpdateResult {
 		LatestVersion:   release.TagName,
 		CurrentVersion:  CurrentAppVersion,
 	}
+}
+
+// BrowserOpenURL opens a URL in the default browser
+func (a *App) BrowserOpenURL(url string) {
+	runtime.BrowserOpenURL(a.ctx, url)
 }

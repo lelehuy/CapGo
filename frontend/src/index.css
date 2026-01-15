@@ -2,13 +2,74 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --bg-main: #F5F5F7;
+  --bg-side: #F5F5F7;
+  --bg-card: #ffffff;
+  --bg-hover: rgba(0, 0, 0, 0.03);
+  --text-main: #1D1D1F;
+  --text-muted: #6E6E73;
+  --border-main: rgba(0, 0, 0, 0.05);
+  --accent: #0071E3;
+  --accent-glow: rgba(0, 113, 227, 0.15);
+  --success-pastel: #34C759;
+  --shadow-soft: 0 8px 32px rgba(0, 0, 0, 0.04);
+  --radius-bento: 24px;
+}
+
+.dark {
+  --bg-main: #000000;
+  --bg-side: #0A0A0A;
+  --bg-card: #121212;
+  --bg-hover: rgba(255, 255, 255, 0.03);
+  --text-main: #F5F5F7;
+  --text-muted: #86868B;
+  --border-main: rgba(255, 255, 255, 0.06);
+  --accent: #0A84FF;
+  --accent-glow: rgba(10, 132, 255, 0.2);
+  --success-pastel: #32D74B;
+  --shadow-soft: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --radius-bento: 24px;
+}
+
+body {
+  background-color: var(--bg-main);
+  color: var(--text-main);
+}
+
+* {
+  transition: background-color 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease, color 0.4s ease;
+}
+
 .react-pdf__Page {
-    margin: 0 !important;
-    padding: 0 !important;
-    display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: block !important;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.08) !important;
+}
+
+.dark .react-pdf__Page {
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5) !important;
 }
 
 .react-pdf__Page canvas {
-    margin: 0 !important;
-    display: block !important;
+  margin: 0 !important;
+  display: block !important;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border-main);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }

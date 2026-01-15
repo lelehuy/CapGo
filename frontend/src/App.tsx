@@ -21,9 +21,11 @@ import {
     AlertCircle,
     Info,
     Clipboard,
-    Upload
+    Upload,
+    Sun,
+    Moon
 } from 'lucide-react';
-import { SelectFiles, SelectFile, StampPDF, GetFile } from '../wailsjs/go/main/App';
+import { SelectFiles, SelectFile, StampPDF, GetFile, CheckForUpdates, BrowserOpenURL } from '../wailsjs/go/main/App';
 import { OnFileDrop, OnFileDropOff, LogInfo } from '../wailsjs/runtime/runtime';
 
 
@@ -91,8 +93,39 @@ function App() {
     const [showSettings, setShowSettings] = useState(false);
     const [isDraggingFile, setIsDraggingFile] = useState(false);
     const [viewportCenter, setViewportCenter] = useState({ x: 0, y: 0 });
+    const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('dark');
 
     const activePdf = activePdfIndex >= 0 ? pdfFiles[activePdfIndex] : null;
+
+    // Theme Effect
+    useEffect(() => {
+        const root = window.document.documentElement;
+        if (theme === 'system') {
+            const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            root.classList.toggle('dark', systemTheme === 'dark');
+        } else {
+            root.classList.toggle('dark', theme === 'dark');
+        }
+    }, [theme]);
+
+    // Auto Update Check on Startup
+    useEffect(() => {
+        const checkAutoUpdate = async () => {
+            try {
+                const result = await CheckForUpdates();
+                setUpdateResult(result);
+                if (result.updateAvailable) {
+                    setShowAbout(true);
+                }
+            } catch (err) {
+                console.error("Auto-update check failed:", err);
+            }
+        };
+
+        // Delay slightly for better UX (let the app load first)
+        const timer = setTimeout(checkAutoUpdate, 2000);
+        return () => clearTimeout(timer);
+    }, []);
 
     const handleFilesAdded = useCallback((paths: string[]) => {
         if (!paths || paths.length === 0) return;
@@ -474,12 +507,78 @@ function App() {
     const [updateResult, setUpdateResult] = useState<any>(null);
     const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
 
+    // Page Manipulation Logic
+    const [copiedPage, setCopiedPage] = useState<{ pdfPath: string, pageNum: number } | null>(null);
+
+    const handlePageAction = async (action: 'delete' | 'duplicate' | 'copy' | 'paste', pageNum: number) => {
+        if (activePdfIndex === -1 || !activePdf) return;
+
+        if (action === 'copy') {
+            setCopiedPage({ pdfPath: activePdf.path, pageNum });
+            notify('info', `Page ${pageNum} copied`);
+            return;
+        }
+
+        try {
+            let newPageOrder: string[] = [];
+            const totalPages = activePdf.stamps.reduce((max, s) => Math.max(max, s.pageNum), 0);
+            // Wait, we need the ACTUAL total pages from PDF. 
+            // Better to pass it from CanvasPreview or get it here.
+            // For now, I'll rely on a hack or add a param.
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const handleUpdatePages = async (newPageOrder: number[]) => {
+        if (activePdfIndex === -1 || !activePdf) return;
+
+        try {
+            setIsProcessing(true);
+            const pageStr = newPageOrder.map(p => String(p));
+            // @ts-ignore
+            const newPath = await window.go.main.App.UpdatePDFPages(activePdf.path, pageStr);
+
+            // Re-map Stamps
+            const newStamps: Stamp[] = [];
+            // For each page in the new order, find stamps that were on that source page
+            newPageOrder.forEach((oldPageNum, newIndex) => {
+                const newPageNum = newIndex + 1;
+                const stampsOnThisPage = activePdf.stamps.filter(s => s.pageNum === oldPageNum);
+
+                // Copy stamps and update their pageNum
+                stampsOnThisPage.forEach(s => {
+                    newStamps.push({
+                        ...s,
+                        id: Math.random().toString(36).substr(2, 9), // New ID for duplicates
+                        pageNum: newPageNum
+                    });
+                });
+            });
+
+            setPdfFiles(prev => {
+                const next = [...prev];
+                next[activePdfIndex] = {
+                    ...next[activePdfIndex],
+                    path: newPath,
+                    stamps: newStamps
+                };
+                return next;
+            });
+
+            notify('success', 'PDF structure updated');
+        } catch (err) {
+            notify('error', `Failed to update PDF: ${err}`);
+        } finally {
+            setIsProcessing(false);
+        }
+    }
+
     const handleCheckUpdate = async () => {
         setIsCheckingUpdate(true);
         setUpdateResult(null);
         try {
-            // @ts-ignore
-            const result = await window.go.main.App.CheckForUpdates();
+            const result = await CheckForUpdates();
             setUpdateResult(result);
         } catch (err) {
             console.error(err);
@@ -490,34 +589,54 @@ function App() {
     };
 
     return (
-        <div className="flex h-screen w-full bg-[#050505] text-white font-sans selection:bg-indigo-500/30">
+        <div className="flex h-screen w-full bg-[var(--bg-main)] text-[var(--text-main)] font-sans selection:bg-indigo-500/30">
             {/* Left Main Sidebar */}
-            <aside className="w-16 border-r border-zinc-900 bg-[#080808] flex flex-col items-center py-6 gap-8 shrink-0">
+            <aside className="m-4 w-14 bg-[var(--bg-card)] rounded-[var(--radius-bento)] shadow-[var(--shadow-soft)] border border-[var(--border-main)] flex flex-col items-center py-7 gap-6 shrink-0 z-20 transition-all">
                 <button
                     onClick={() => setShowAbout(true)}
-                    className="w-10 h-10 bg-zinc-900/50 rounded-xl flex items-center justify-center border border-zinc-800 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-all cursor-pointer group"
+                    className="w-10 h-10 bg-[var(--bg-main)] rounded-xl flex items-center justify-center border border-[var(--border-main)] hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all cursor-pointer group shadow-sm"
                 >
-                    <img src={logo} className="w-6 h-6 object-contain opacity-70 group-hover:opacity-100 transition-opacity" alt="Logo" />
+                    <img src={logo} className="w-6 h-6 object-contain opacity-80 group-hover:opacity-100 transition-opacity" alt="Logo" />
                 </button>
                 <nav className="flex flex-col gap-6">
-                    <button onClick={() => setIsDrawing(true)} className="p-2.5 rounded-xl hover:bg-zinc-900 text-zinc-500 hover:text-indigo-400 transition-all group relative">
+                    <button
+                        onClick={() => {
+                            if (!activePdf) {
+                                notify('info', 'Please import a PDF first to add stamps');
+                                return;
+                            }
+                            setIsDrawing(true);
+                        }}
+                        className={`p-2.5 rounded-xl transition-all group relative ${!activePdf ? 'opacity-20 cursor-not-allowed text-[var(--text-muted)]' : 'hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--accent)]'}`}
+                        disabled={!activePdf}
+                    >
                         <PenTool size={20} />
-                        <span className="absolute left-full ml-4 px-2 py-1 bg-zinc-800 text-[10px] rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">Draw Signature</span>
+                        <span className="absolute left-full ml-4 px-3 py-1.5 bg-[var(--bg-card)] border border-[var(--border-main)] text-[10px] rounded-lg shadow-xl text-[var(--text-main)] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">Draw Signature</span>
                     </button>
-                    <button onClick={handleSelectStampImage} className="p-2.5 rounded-xl hover:bg-zinc-900 text-zinc-500 hover:text-indigo-400 transition-all group relative">
+                    <button
+                        onClick={() => {
+                            if (!activePdf) {
+                                notify('info', 'Please import a PDF first to add stamps');
+                                return;
+                            }
+                            handleSelectStampImage();
+                        }}
+                        className={`p-2.5 rounded-xl transition-all group relative ${!activePdf ? 'opacity-20 cursor-not-allowed text-[var(--text-muted)]' : 'hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--accent)]'}`}
+                        disabled={!activePdf}
+                    >
                         <ImageIcon size={20} />
-                        <span className="absolute left-full ml-4 px-2 py-1 bg-zinc-800 text-[10px] rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">Upload Image</span>
+                        <span className="absolute left-full ml-4 px-3 py-1.5 bg-[var(--bg-card)] border border-[var(--border-main)] text-[10px] rounded-lg shadow-xl text-[var(--text-main)] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">Upload Image</span>
                     </button>
-                    <div className="w-8 h-px bg-zinc-900 mx-auto my-2" />
-                    <button onClick={handleSelectFiles} className="p-2.5 rounded-xl hover:bg-zinc-900 text-zinc-500 hover:text-emerald-400 transition-all group relative">
+                    <div className="w-6 h-px bg-[var(--border-main)] mx-auto my-1" />
+                    <button onClick={handleSelectFiles} className="p-2.5 rounded-xl hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-emerald-500 transition-all group relative">
                         <Plus size={20} />
-                        <span className="absolute left-full ml-4 px-2 py-1 bg-zinc-800 text-[10px] rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">Add PDF Files</span>
+                        <span className="absolute left-full ml-4 px-3 py-1.5 bg-[var(--bg-card)] border border-[var(--border-main)] text-[10px] rounded-lg shadow-xl text-[var(--text-main)] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">Add PDF Files</span>
                     </button>
                 </nav>
                 <div className="mt-auto">
                     <button
                         onClick={() => setShowSettings(true)}
-                        className={`p-2.5 rounded-xl transition-all ${showSettings ? 'bg-zinc-900 text-indigo-400' : 'text-zinc-700 hover:text-zinc-500'}`}
+                        className={`p-2.5 rounded-xl transition-all ${showSettings ? 'bg-indigo-500/10 text-[var(--accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
                     >
                         <Settings size={20} />
                     </button>
@@ -525,27 +644,27 @@ function App() {
             </aside>
 
             {/* Document Queue Sidebar */}
-            <aside className="w-72 border-r border-zinc-900 bg-[#0A0A0A] flex flex-col shrink-0">
-                <header className="p-5 h-[72px] border-b border-zinc-900 flex items-center justify-between bg-zinc-950/20">
+            <aside className="my-4 mr-4 w-60 bg-[var(--bg-card)] rounded-[var(--radius-bento)] shadow-[var(--shadow-soft)] border border-[var(--border-main)] flex flex-col shrink-0 overflow-hidden z-10 transition-all">
+                <header className="p-6 h-[72px] flex items-center justify-between bg-[var(--bg-main)]/30 border-b border-[var(--border-main)]">
                     <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-lg overflow-hidden border border-white/10 shrink-0">
+                        <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden border border-[var(--border-main)] shrink-0">
                             <img src={logo} className="w-[85%] h-[85%] object-contain" alt="Logo" />
                         </div>
-                        <h2 className="text-[12px] font-black uppercase tracking-[0.2em] text-white">CapGo</h2>
+                        <h2 className="text-[13px] font-black uppercase tracking-[0.2em] text-[var(--text-main)]">CapGo</h2>
                     </div>
                 </header>
 
-                <div className="p-4 border-b border-zinc-900/50 bg-zinc-900/10 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                <div className="p-5 border-b border-[var(--border-main)] bg-[var(--bg-main)]/10 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
                         <input
                             type="checkbox"
                             checked={pdfFiles.length > 0 && pdfFiles.every(f => f.selected)}
                             onChange={(e) => toggleSelectAll(e.target.checked)}
-                            className="w-3.5 h-3.5 rounded border-zinc-700 bg-zinc-900 text-indigo-600 focus:ring-offset-0 focus:ring-0 cursor-pointer"
+                            className="w-4 h-4 rounded-lg border-[var(--border-main)] bg-[var(--bg-main)] text-[var(--accent)] focus:ring-offset-0 focus:ring-0 cursor-pointer transition-all"
                         />
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Documents</span>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Documents</span>
                     </div>
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-zinc-900 text-zinc-500">{pdfFiles.length}</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[var(--bg-main)] text-[var(--text-muted)] border border-[var(--border-main)] shadow-sm">{pdfFiles.length}</span>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
@@ -561,7 +680,8 @@ function App() {
                             <div
                                 key={idx}
                                 onClick={() => setActivePdfIndex(idx)}
-                                className={`group relative p-3 rounded-xl border transition-all cursor-pointer ${activePdfIndex === idx ? 'bg-indigo-600/10 border-indigo-500/50 shadow-[0_0_20px_rgba(79,70,229,0.05)]' : 'border-transparent hover:bg-zinc-900/50 hover:border-zinc-800'}`}
+                                title={file.name}
+                                className={`group relative p-4 rounded-2xl border transition-all cursor-pointer mx-4 mt-2 ${activePdfIndex === idx ? 'bg-[var(--accent)]/5 border-[var(--accent)]/20 shadow-md' : 'bg-[var(--bg-main)]/5 border-transparent hover:bg-[var(--bg-hover)]'}`}
                             >
                                 <div className="flex items-start gap-3">
                                     <input
@@ -571,10 +691,12 @@ function App() {
                                             e.stopPropagation();
                                             toggleSelect(idx);
                                         }}
-                                        className="mt-0.5 w-3.5 h-3.5 rounded border-zinc-700 bg-zinc-900 text-indigo-600 focus:ring-offset-0 focus:ring-0 cursor-pointer"
+                                        className="mt-1 w-4 h-4 rounded-lg border-[var(--border-main)] bg-[var(--bg-main)] text-[var(--accent)] focus:ring-offset-0 focus:ring-0 cursor-pointer transition-all"
                                     />
                                     <div className="flex-1 min-w-0 pr-6">
-                                        <p className="text-[11px] font-semibold text-zinc-200 truncate group-hover:text-white transition-colors">
+                                        <p
+                                            className="text-[11px] font-semibold text-[var(--text-main)] truncate group-hover:text-[var(--accent)] transition-colors"
+                                        >
                                             {file.name}
                                         </p>
                                         <div className="flex items-center gap-2 mt-1">
@@ -614,119 +736,24 @@ function App() {
                     )}
                 </div>
 
-                <footer className="p-4 bg-zinc-950/50 border-t border-zinc-900">
+                <footer className="p-6 bg-[var(--bg-main)]/20 border-t border-[var(--border-main)]">
                     <button
                         onClick={processAll}
                         disabled={isProcessing || !pdfFiles.some(f => f.selected)}
-                        className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-550 disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-[11px] font-bold flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/10 transition-all active:scale-[0.98]"
+                        className="w-full py-3.5 rounded-2xl bg-[var(--accent)] hover:bg-[var(--accent)]/90 disabled:bg-[var(--bg-hover)] disabled:text-[var(--text-muted)] text-white text-[11px] font-black uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl shadow-[var(--accent)]/10 transition-all active:scale-[0.98]"
                     >
-                        {isProcessing ? <Loader2 className="animate-spin" size={14} /> : <Play size={14} fill="currentColor" />}
+                        {isProcessing ? <Loader2 className="animate-spin" size={16} /> : <Play size={16} fill="currentColor" />}
                         EXPORT ({pdfFiles.filter(f => f.selected).length})
                     </button>
                 </footer>
             </aside>
 
             {/* Editor Workspace */}
-            <main className="flex-1 flex flex-col relative overflow-hidden bg-[#0A0A0A]">
-                {/* Top Control Bar */}
-                <div className="h-14 border-b border-zinc-900 bg-zinc-950/40 backdrop-blur-md flex items-center justify-between px-6 shrink-0">
-                    <div className="flex items-center gap-8">
-                        <div className="flex flex-col">
-                            <h1 className="text-[11px] font-bold text-zinc-100 truncate max-w-[300px] tracking-tight">
-                                {activePdf ? activePdf.name : 'No Active Document'}
-                            </h1>
-                            {activePdf?.resultPath && (
-                                <button
-                                    onClick={() => (window as any).go.main.App.OpenFile(activePdf.resultPath)}
-                                    className="flex items-center gap-1.5 text-[9px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors mt-0.5"
-                                >
-                                    <Check size={10} /> OPEN EXPORTED
-                                </button>
-                            )}
-                        </div>
-
-                        {activePdf && (
-                            <div className="flex items-center gap-6">
-                                <div className="flex items-center gap-2.5 bg-zinc-900/50 px-3 py-1 rounded-lg border border-zinc-800/50 shadow-inner">
-                                    <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-[0.1em]">Jump to</span>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                                const val = parseInt((e.target as HTMLInputElement).value);
-                                                if (val > 0) {
-                                                    setJumpToPage(val);
-                                                    setTimeout(() => setJumpToPage(null), 100);
-                                                }
-                                            }
-                                        }}
-                                        className="w-10 h-6 bg-zinc-950 border border-zinc-800/50 rounded text-[10px] text-center font-bold font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-200"
-                                        placeholder="1"
-                                    />
-                                </div>
-
-                                <div className="flex items-center gap-2.5 bg-zinc-900/50 px-3 py-1 rounded-lg border border-zinc-800/50 shadow-inner">
-                                    <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-[0.1em]">Selected</span>
-                                    <div className={`w-2 h-2 rounded-full ${activeStampId ? 'bg-indigo-500 animate-pulse' : 'bg-zinc-800'}`} />
-                                    <span className="text-[10px] font-mono text-zinc-400 min-w-[60px]">
-                                        {activeStampId ? activeStampId.substr(0, 8) : 'NONE'}
-                                    </span>
-                                </div>
-
-                                <div className="flex items-center gap-1 bg-zinc-900/50 p-1 rounded-lg border border-zinc-800/50">
-                                    <button
-                                        onClick={() => {
-                                            if (activeStampId && activePdf) {
-                                                const stamp = activePdf.stamps.find(s => s.id === activeStampId);
-                                                if (stamp) {
-                                                    setClipboardStamp({ ...stamp });
-                                                    notify('info', 'Stamp copied to clipboard');
-                                                }
-                                            }
-                                        }}
-                                        disabled={!activeStampId}
-                                        className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-indigo-400 disabled:opacity-20 transition-all group relative"
-                                        title="Copy selected stamp"
-                                    >
-                                        <Copy size={16} />
-                                    </button>
-                                    <button
-                                        onClick={doPaste}
-                                        disabled={!clipboardStamp}
-                                        className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-indigo-400 disabled:opacity-20 transition-all group relative"
-                                        title="Paste stamp"
-                                    >
-                                        <Clipboard size={16} />
-                                    </button>
-                                </div>
-
-                                <button
-                                    onClick={handleClearStamps}
-                                    className="p-2 rounded-lg hover:bg-red-500/10 text-zinc-600 hover:text-red-400 transition-all group relative"
-                                    title="Clear all stamps"
-                                >
-                                    <Trash2 size={16} />
-                                    <span className="absolute top-full mt-2 right-0 px-2 py-1 bg-zinc-800 text-[9px] rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 shadow-2xl border border-zinc-700 text-zinc-300 font-bold uppercase tracking-tighter">Clear All Stamps</span>
-                                </button>
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="flex items-center gap-3">
-
-                        {stampImage && (
-                            <div className="h-8 w-8 bg-zinc-900 rounded-lg p-1.5 border border-zinc-800 overflow-hidden ring-1 ring-zinc-700">
-                                <img src={stampImage} className="w-full h-full object-contain invert" alt="Stamp" />
-                            </div>
-                        )}
-                    </div>
-                </div>
-
+            <main className="flex-1 flex flex-col relative overflow-hidden bg-[var(--bg-main)] m-4 ml-0 rounded-[var(--radius-bento)] shadow-[var(--shadow-soft)] border border-[var(--border-main)]">
                 {/* Preview Area */}
-                <section className="flex-1 overflow-auto p-12 flex justify-center items-start custom-scrollbar">
+                <section className="flex-1 overflow-hidden flex justify-center items-start">
                     {activePdf ? (
-                        <div className="w-full h-full animate-in fade-in zoom-in-95 duration-500">
+                        <div className="w-full h-full animate-in fade-in duration-700">
                             <CanvasPreview
                                 pdfPath={activePdf.path}
                                 stamps={activePdf.stamps}
@@ -736,19 +763,119 @@ function App() {
                                 onEnvChange={handleCanvasEnvChange}
                                 onPageInView={setActivePage}
                                 onViewportChange={handleViewportChange}
+                                onUpdatePages={handleUpdatePages}
                                 activePage={activePage}
                                 jumpToPage={jumpToPage}
+                                toolbar={
+                                    <div className="flex items-center gap-4 bg-[var(--bg-card)] border border-[var(--border-main)] p-2 rounded-2xl animate-in slide-in-from-top-4 duration-500">
+                                        <div className="flex items-center gap-3 px-4 border-r border-[var(--border-main)]">
+                                            <div className="flex flex-col">
+                                                <h1 className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] max-w-[150px] truncate">
+                                                    {activePdf.name}
+                                                </h1>
+                                                {activePdf?.resultPath && (
+                                                    <button
+                                                        onClick={() => (window as any).go.main.App.OpenFile(activePdf.resultPath)}
+                                                        className="text-[8px] font-black text-emerald-500 hover:text-emerald-400 transition-colors uppercase text-left"
+                                                    >
+                                                        Open Exported
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-4">
+                                            <div className="flex items-center gap-2 bg-black/5 dark:bg-black/40 px-3 py-1.5 rounded-xl border border-[var(--border-main)]">
+                                                <span className="text-[9px] font-black text-[var(--text-muted)] uppercase">Jump</span>
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                            const val = parseInt((e.target as HTMLInputElement).value);
+                                                            if (val > 0) {
+                                                                setJumpToPage(val);
+                                                                setTimeout(() => setJumpToPage(null), 100);
+                                                            }
+                                                        }
+                                                    }}
+                                                    className="w-8 bg-transparent text-[10px] text-center font-black text-[var(--text-main)] focus:outline-none"
+                                                    placeholder="1"
+                                                />
+                                            </div>
+
+                                            <div className="flex items-center gap-2 bg-black/5 dark:bg-black/40 px-3 py-1.5 rounded-xl border border-[var(--border-main)]">
+                                                <div className={`w-1.5 h-1.5 rounded-full ${activeStampId ? 'bg-indigo-500 animate-pulse' : 'bg-zinc-800'}`} />
+                                                <span className="text-[10px] font-black text-[var(--text-muted)] font-mono">
+                                                    {activeStampId ? activeStampId.substr(0, 4).toUpperCase() : 'NONE'}
+                                                </span>
+                                            </div>
+
+                                            <div className="flex items-center gap-1 bg-black/5 dark:bg-black/40 p-1 rounded-xl border border-[var(--border-main)]">
+                                                <button
+                                                    onClick={() => {
+                                                        if (activeStampId && activePdf) {
+                                                            const stamp = activePdf.stamps.find(s => s.id === activeStampId);
+                                                            if (stamp) {
+                                                                setClipboardStamp({ ...stamp });
+                                                                notify('info', 'Stamp copied');
+                                                            }
+                                                        }
+                                                    }}
+                                                    disabled={!activeStampId}
+                                                    className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-indigo-400 disabled:opacity-20 transition-all"
+                                                >
+                                                    <Copy size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={doPaste}
+                                                    disabled={!clipboardStamp}
+                                                    className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-indigo-400 disabled:opacity-20 transition-all"
+                                                >
+                                                    <Clipboard size={14} />
+                                                </button>
+                                                <div className="w-px h-4 bg-[var(--border-main)] mx-1" />
+                                                <button
+                                                    onClick={handleClearStamps}
+                                                    className="p-1.5 rounded-lg hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-400 transition-all"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {stampImage && (
+                                            <div className="h-8 w-8 bg-black/5 dark:bg-black/40 rounded-xl p-1.5 border border-[var(--border-main)] overflow-hidden ml-2 shadow-inner">
+                                                <img src={stampImage} className={`w-full h-full object-contain ${theme === 'dark' ? 'invert' : ''} opacity-80`} alt="Stamp" />
+                                            </div>
+                                        )}
+                                    </div>
+                                }
                             />
                         </div>
                     ) : (
-                        <div className="h-full flex-1 flex flex-col items-center justify-center text-center opacity-40">
-                            <div className="w-32 h-32 bg-zinc-900 rounded-full flex items-center justify-center mb-8 ring-1 ring-zinc-800 shadow-2xl">
-                                <Layers size={48} className="text-zinc-600" />
+                        <div className="h-full flex-1 flex flex-col items-center justify-center text-center animate-in fade-in zoom-in-95 duration-1000 ease-out">
+                            <div className="relative group">
+                                {/* Soft Glow Effect */}
+                                <div className="absolute -inset-4 bg-indigo-500/20 rounded-[3rem] blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+
+                                <div className="relative w-24 h-24 bg-zinc-900/50 rounded-[2.5rem] flex items-center justify-center mb-8 border border-white/5 shadow-[0_20px_50px_rgba(0,0,0,0.5)] transition-transform duration-500 group-hover:scale-105 active:scale-95">
+                                    <Layers size={32} className="text-zinc-600 transition-colors duration-500 group-hover:text-indigo-400" />
+                                </div>
                             </div>
-                            <h2 className="text-2xl font-bold text-white mb-3">Workspace Ready</h2>
-                            <p className="text-zinc-500 max-w-xs text-sm">
+
+                            <h2 className="text-xl font-black text-[var(--text-main)] mb-2 uppercase tracking-[0.2em]">Workspace Ready</h2>
+                            <p className="text-[var(--text-muted)] dark:text-zinc-400/80 max-w-[240px] text-[10px] font-bold uppercase tracking-widest leading-relaxed mb-8">
                                 Import documents and add a signature tool from the left sidebar to begin.
                             </p>
+
+                            <button
+                                onClick={handleSelectFiles}
+                                className="px-8 py-3.5 bg-gradient-to-br from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] shadow-[0_15px_30px_-5px_rgba(79,70,229,0.3)] hover:shadow-[0_20px_40px_-5px_rgba(79,70,229,0.4)] transition-all hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-3 group"
+                            >
+                                <Plus size={18} className="group-hover:rotate-90 transition-transform duration-300" />
+                                Import Your First PDF
+                            </button>
                         </div>
                     )}
                 </section>
@@ -757,9 +884,9 @@ function App() {
 
             {/* About Modal */}
             {showAbout && (
-                <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-8 animate-in fade-in duration-300">
-                    <div className="bg-zinc-950 border border-zinc-900 rounded-3xl p-10 w-full max-w-md shadow-2xl relative overflow-hidden flex flex-col items-center text-center">
-                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-500"></div>
+                <div className="fixed inset-0 z-[100] bg-black/40 dark:bg-black/80 backdrop-blur-md flex items-center justify-center p-8 animate-in fade-in duration-300">
+                    <div className="bg-[var(--bg-card)] border border-[var(--border-main)] rounded-[var(--radius-bento)] p-12 w-full max-w-md shadow-[var(--shadow-soft)] relative overflow-hidden flex flex-col items-center text-center">
+                        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-500 opacity-50"></div>
 
                         <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center shadow-lg overflow-hidden border border-white/10 mb-6">
                             <img src={logo} className="w-[85%] h-[85%] object-contain" alt="Logo" />
@@ -772,13 +899,13 @@ function App() {
                             <button
                                 onClick={handleCheckUpdate}
                                 disabled={isCheckingUpdate}
-                                className="px-6 py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-xl text-xs font-bold transition-all flex items-center gap-2 group"
+                                className="px-8 py-3 bg-[var(--bg-main)] hover:bg-[var(--bg-hover)] border border-[var(--border-main)] rounded-2xl text-[10px] font-black uppercase tracking-widest text-[var(--text-main)] transition-all flex items-center gap-3 group shadow-sm"
                             >
-                                {isCheckingUpdate ? <Loader2 size={14} className="animate-spin text-zinc-400" /> : <Download size={14} className="text-zinc-400 group-hover:text-emerald-400" />}
+                                {isCheckingUpdate ? <Loader2 size={16} className="animate-spin text-[var(--text-muted)]" /> : <Download size={16} className="text-[var(--text-muted)] group-hover:text-[var(--accent)]" />}
                                 {isCheckingUpdate ? 'CHECKING...' : 'CHECK FOR UPDATES'}
                             </button>
                         ) : (
-                            <div className="w-full bg-zinc-900/50 rounded-xl p-4 border border-zinc-800 text-left">
+                            <div className="w-full bg-[var(--bg-main)] rounded-2xl p-6 border border-[var(--border-main)] text-left shadow-inner">
                                 {updateResult.error ? (
                                     <div className="flex items-center gap-2 text-red-400 text-xs font-bold">
                                         <AlertCircle size={14} />
@@ -795,7 +922,7 @@ function App() {
                                             <pre className="whitespace-pre-wrap font-sans">{updateResult.releaseNotes}</pre>
                                         </div>
                                         <button
-                                            onClick={() => (window as any).go.main.App.BrowserOpenURL(updateResult.releaseUrl)}
+                                            onClick={() => BrowserOpenURL(updateResult.releaseUrl)}
                                             className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2"
                                         >
                                             <Download size={12} /> UPDATE NOW
@@ -827,15 +954,7 @@ function App() {
             {/* Sign Modal */}
             {isDrawing && (
                 <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-8 animate-in fade-in duration-300">
-                    <div className="bg-zinc-950 border border-zinc-900 rounded-3xl p-8 w-full max-w-2xl shadow-2xl">
-                        <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-xl font-bold flex items-center gap-3">
-                                <PenTool className="text-indigo-400" /> Draw Signature
-                            </h2>
-                            <button onClick={() => setIsDrawing(false)} className="p-2 hover:bg-zinc-900 rounded-full transition-colors">
-                                <Plus className="rotate-45 text-zinc-500" />
-                            </button>
-                        </div>
+                    <div className="w-full max-w-2xl shadow-2xl animate-in zoom-in-95 duration-300">
                         <SignaturePad onSave={handleSaveSignature} onCancel={() => setIsDrawing(false)} />
                     </div>
                 </div>
@@ -843,13 +962,13 @@ function App() {
 
             {/* Settings Modal */}
             {showSettings && (
-                <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-8 animate-in fade-in duration-300">
-                    <div className="bg-zinc-950 border border-zinc-900 rounded-3xl p-10 w-full max-w-lg shadow-2xl relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-500"></div>
+                <div className="fixed inset-0 z-[100] bg-black/40 dark:bg-black/80 backdrop-blur-md flex items-center justify-center p-8 animate-in fade-in duration-300">
+                    <div className="bg-[var(--bg-card)] border border-[var(--border-main)] rounded-[var(--radius-bento)] p-12 w-full max-w-lg shadow-[var(--shadow-soft)] relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-500 opacity-50"></div>
                         <div className="flex justify-between items-center mb-8">
-                            <h2 className="text-2xl font-bold tracking-tight">App Settings</h2>
-                            <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-zinc-900 rounded-full transition-colors">
-                                <X size={20} className="text-zinc-500" />
+                            <h2 className="text-2xl font-bold tracking-tight text-[var(--text-main)]">App Settings</h2>
+                            <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-[var(--bg-hover)] rounded-full transition-colors">
+                                <X size={20} className="text-[var(--text-muted)]" />
                             </button>
                         </div>
 
@@ -868,22 +987,43 @@ function App() {
 
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <p className="font-bold text-zinc-100">Auto-Save Layout</p>
-                                    <p className="text-[11px] text-zinc-500">Save progress automatically</p>
+                                    <p className="font-bold text-[var(--text-main)]">Auto-Save Layout</p>
+                                    <p className="text-[11px] text-[var(--text-muted)]">Save progress automatically</p>
                                 </div>
-                                <div className="w-10 h-5 bg-indigo-600 rounded-full relative">
+                                <div className="w-10 h-5 bg-[var(--accent)] rounded-full relative transition-all">
                                     <div className="absolute right-1 top-1 w-3 h-3 bg-white rounded-full"></div>
                                 </div>
                             </div>
 
-                            <div className="pt-4 border-t border-zinc-900">
-                                <p className="text-[10px] text-zinc-600 font-mono">Build Version: 1.0.4-production</p>
+                            <div className="space-y-4">
+                                <div>
+                                    <p className="font-bold text-[var(--text-main)]">Appearance</p>
+                                    <p className="text-[11px] text-[var(--text-muted)]">Choose your preferred application theme</p>
+                                </div>
+                                <div className="grid grid-cols-3 gap-3">
+                                    {(['light', 'dark', 'system'] as const).map((t) => (
+                                        <button
+                                            key={t}
+                                            onClick={() => setTheme(t)}
+                                            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all ${theme === t ? 'bg-[var(--accent)]/10 border-[var(--accent)] text-[var(--accent)]' : 'bg-transparent border-[var(--border-main)] text-[var(--text-muted)] hover:border-[var(--text-muted)]'}`}
+                                        >
+                                            {t === 'light' && <Sun size={16} />}
+                                            {t === 'dark' && <Moon size={16} />}
+                                            {t === 'system' && <Settings size={16} />}
+                                            <span className="text-[10px] font-bold uppercase tracking-widest">{t}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="pt-4 border-t border-[var(--border-main)]">
+                                <p className="text-[10px] text-[var(--text-muted)] font-mono">Build Version: 1.0.4-production</p>
                             </div>
                         </div>
 
                         <button
                             onClick={() => setShowSettings(false)}
-                            className="w-full mt-10 py-3 bg-zinc-900 hover:bg-zinc-800 rounded-xl text-xs font-bold transition-all border border-zinc-800"
+                            className="w-full mt-10 py-3 bg-[var(--bg-side)] hover:bg-[var(--bg-hover)] text-[var(--text-main)] rounded-xl text-xs font-bold transition-all border border-[var(--border-main)]"
                         >
                             CLOSE
                         </button>
@@ -895,7 +1035,7 @@ function App() {
                 {notifications.map(n => (
                     <div
                         key={n.id}
-                        className={`px-5 py-3.5 rounded-2xl shadow-2xl backdrop-blur-xl border border-white/10 flex items-center gap-3 animate-in slide-in-from-right-10 fade-in duration-300 pointer-events-auto ${n.type === 'success' ? 'bg-emerald-500/10 text-emerald-400' :
+                        className={`px-5 py-3.5 rounded-2xl shadow-2xl backdrop-blur-xl border border-white/10 flex items-center gap-3 animate-in slide-in-from-right-10 fade-in duration-300 pointer-events-auto ${n.type === 'success' ? 'bg-emerald-500/10 text-[var(--success-pastel)]' :
                             n.type === 'error' ? 'bg-red-500/10 text-red-400' :
                                 'bg-indigo-500/10 text-indigo-400'
                             }`}

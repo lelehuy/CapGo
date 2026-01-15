@@ -52,6 +52,23 @@ xattr -cr "build/bin/$APP_NAME.app"
 echo "🔑 Signing application (ad-hoc)..."
 codesign --force --deep --sign - "build/bin/$APP_NAME.app"
 
+# 4.5. Create a Helper script for Gatekeeper issues
+echo "🛠️ Creating Gatekeeper fix helper..."
+FIX_SCRIPT="build/bin/Fix CapGo (Double Click Me).command"
+cat <<EOF > "$FIX_SCRIPT"
+#!/bin/bash
+cd "\$(dirname "\$0")"
+chmod +x "$APP_NAME.app"
+xattr -cr "$APP_NAME.app"
+echo "------------------------------------------------"
+echo "✨ Fix applied! You can now open $APP_NAME."
+echo "------------------------------------------------"
+# Open the app automatically
+open "$APP_NAME.app"
+exit 0
+EOF
+chmod +x "$FIX_SCRIPT"
+
 # 5. Create the DMG
 echo "💿 Creating DMG installer..."
 # Removing --background to avoid Finder corruption. macOS defaults to white anyway.

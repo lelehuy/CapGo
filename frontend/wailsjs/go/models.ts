@@ -29,6 +29,7 @@ export namespace main {
 	    releaseNotes: string;
 	    currentVersion: string;
 	    error?: string;
+	    downloadUrl: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new UpdateResult(source);
@@ -42,6 +43,7 @@ export namespace main {
 	        this.releaseNotes = source["releaseNotes"];
 	        this.currentVersion = source["currentVersion"];
 	        this.error = source["error"];
+	        this.downloadUrl = source["downloadUrl"];
 	    }
 	}
 

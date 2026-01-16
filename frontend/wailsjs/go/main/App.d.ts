@@ -6,7 +6,11 @@ export function BrowserOpenURL(arg1:string):Promise<void>;
 
 export function CheckForUpdates():Promise<main.UpdateResult>;
 
+export function DownloadUpdate(arg1:string):Promise<string>;
+
 export function GetFile(arg1:string):Promise<Array<number>>;
+
+export function InstallUpdate(arg1:string):Promise<void>;
 
 export function OpenFile(arg1:string):Promise<void>;
 

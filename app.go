@@ -284,9 +284,15 @@ func (a *App) UpdatePDFPages(pdfPath string, pages []string) (string, error) {
 
 // Release represents a GitHub release
 type Release struct {
-	TagName string `json:"tag_name"`
-	HtmlUrl string `json:"html_url"`
-	Body    string `json:"body"`
+	TagName string  `json:"tag_name"`
+	HtmlUrl string  `json:"html_url"`
+	Body    string  `json:"body"`
+	Assets  []Asset `json:"assets"`
+}
+
+type Asset struct {
+	Name               string `json:"name"`
+	BrowserDownloadUrl string `json:"browser_download_url"`
 }
 
 // UpdateResult contains the update check information
@@ -297,6 +303,7 @@ type UpdateResult struct {
 	ReleaseNotes    string `json:"releaseNotes"`
 	CurrentVersion  string `json:"currentVersion"`
 	Error           string `json:"error,omitempty"`
+	DownloadUrl     string `json:"downloadUrl"`
 }
 
 const CurrentAppVersion = "v1.0.5"
@@ -321,6 +328,15 @@ func (a *App) CheckForUpdates() UpdateResult {
 	// Simple version comparison (assumes tags are like "v1.0.4")
 	// If the tags differ, we assume it's an update (or at least a difference)
 	// For production, use a semver library.
+
+	var downloadUrl string
+	for _, asset := range release.Assets {
+		if strings.HasSuffix(asset.Name, ".dmg") {
+			downloadUrl = asset.BrowserDownloadUrl
+			break
+		}
+	}
+
 	if release.TagName != CurrentAppVersion {
 		return UpdateResult{
 			UpdateAvailable: true,
@@ -328,6 +344,7 @@ func (a *App) CheckForUpdates() UpdateResult {
 			ReleaseUrl:      release.HtmlUrl,
 			ReleaseNotes:    release.Body,
 			CurrentVersion:  CurrentAppVersion,
+			DownloadUrl:     downloadUrl,
 		}
 	}
 
@@ -336,6 +353,101 @@ func (a *App) CheckForUpdates() UpdateResult {
 		LatestVersion:   release.TagName,
 		CurrentVersion:  CurrentAppVersion,
 	}
+}
+
+// DownloadUpdate downloads the update file to the Downloads folder
+func (a *App) DownloadUpdate(url string) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	downloadPath := filepath.Join(homeDir, "Downloads", fmt.Sprintf("CapGo-Update-%d.dmg", os.Getpid()))
+	out, err := os.Create(downloadPath)
+	if err != nil {
+		return "", err
+	}
+	defer out.Close()
+
+	_, err = out.ReadFrom(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return downloadPath, nil
+}
+
+// InstallUpdate installs the update seamlessly
+func (a *App) InstallUpdate(dmgPath string) error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	// Safety check: specific logic for macOS .app bundle
+	// CapGo.app/Contents/MacOS/CapGo
+	if !strings.Contains(exePath, ".app/Contents/MacOS") {
+		return fmt.Errorf("developer mode detected: cannot auto-update binary outside of .app bundle")
+	}
+
+	appBundlePath := filepath.Dir(filepath.Dir(filepath.Dir(exePath))) // Path/to/CapGo.app
+
+	// Create a shell script to handle the swap after this process quits
+	scriptContent := fmt.Sprintf(`#!/bin/bash
+PID=%d
+DMG_PATH="%s"
+DEST_APP="%s"
+MOUNT_POINT="/tmp/CapGo_Update_Mnt_%d"
+
+# 1. Wait for the main app to terminate
+while kill -0 $PID 2>/dev/null; do sleep 0.5; done
+
+# 2. Mount the DMG
+mkdir -p "$MOUNT_POINT"
+hdiutil attach "$DMG_PATH" -mountpoint "$MOUNT_POINT" -nobrowse -readonly
+
+# 3. Swap the Application
+SOURCE_APP="$MOUNT_POINT/CapGo.app"
+
+if [ -d "$SOURCE_APP" ]; then
+    echo "Replacing App..."
+    rm -rf "$DEST_APP"
+    cp -R "$SOURCE_APP" "$DEST_APP"
+    
+    # 3.5. Fix Permissions (Quarantine)
+    xattr -cr "$DEST_APP"
+
+    # 4. Relaunch
+    open "$DEST_APP"
+else
+    echo "Update failed: App not found in DMG"
+fi
+
+# 5. Cleanup
+hdiutil detach "$MOUNT_POINT" -force
+rm -rf "$MOUNT_POINT"
+`, os.Getpid(), dmgPath, appBundlePath, os.Getpid())
+
+	scriptPath := filepath.Join(os.TempDir(), "capgo_updater.sh")
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+		return err
+	}
+
+	// Run the updater script detached
+	cmd := exec.Command("sh", scriptPath)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	// Quit the app immediately so the script can overwrite it
+	runtime.Quit(a.ctx)
+	return nil
 }
 
 // BrowserOpenURL opens a URL in the default browser

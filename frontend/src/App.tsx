@@ -27,7 +27,7 @@ import {
     FolderOpen,
     ExternalLink
 } from 'lucide-react';
-import { SelectFiles, SelectFile, StampPDF, GetFile, CheckForUpdates, BrowserOpenURL } from '../wailsjs/go/main/App';
+import { SelectFiles, SelectFile, StampPDF, GetFile, CheckForUpdates, BrowserOpenURL, DownloadUpdate, InstallUpdate } from '../wailsjs/go/main/App';
 import { OnFileDrop, OnFileDropOff, LogInfo } from '../wailsjs/runtime/runtime';
 
 
@@ -661,6 +661,34 @@ function App() {
         }
     }
 
+
+
+    const [isUpdating, setIsUpdating] = useState(false);
+
+    const handleUpdate = async () => {
+        if (!updateResult || !updateResult.downloadUrl) {
+            // Fallback
+            BrowserOpenURL("https://github.com/lelehuy/CapGo/releases");
+            return;
+        }
+
+        try {
+            setIsUpdating(true);
+            notify('info', 'Downloading update...');
+            // @ts-ignore
+            const path = await window.go.main.App.DownloadUpdate(updateResult.downloadUrl);
+            notify('success', 'Download complete. Restarting app...');
+            // @ts-ignore
+            await window.go.main.App.InstallUpdate(path);
+            setIsUpdating(false);
+        } catch (err) {
+            console.error("Update failed:", err);
+            notify('error', 'Auto-update failed. Opening browser...');
+            BrowserOpenURL(updateResult.releaseUrl || "https://github.com/lelehuy/CapGo/releases");
+            setIsUpdating(false);
+        }
+    };
+
     const handleCheckUpdate = async () => {
         setIsCheckingUpdate(true);
         setUpdateResult(null);
@@ -1003,7 +1031,7 @@ function App() {
                             </div>
 
                             <h2 className="text-2xl font-black uppercase tracking-widest text-white mb-1">CapGo</h2>
-                            <p className="text-zinc-500 text-xs font-mono mb-8">Version 1.0.4-production</p>
+                            <p className="text-zinc-500 text-xs font-mono mb-8">Version 1.0.5-production</p>
 
                             {!updateResult ? (
                                 <button
@@ -1032,10 +1060,12 @@ function App() {
                                                 <pre className="whitespace-pre-wrap font-sans">{updateResult.releaseNotes}</pre>
                                             </div>
                                             <button
-                                                onClick={() => BrowserOpenURL(updateResult.releaseUrl)}
-                                                className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2"
+                                                onClick={handleUpdate}
+                                                disabled={isUpdating}
+                                                className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
-                                                <Download size={12} /> UPDATE NOW
+                                                {isUpdating ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} 
+                                                {isUpdating ? 'DOWNLOADING...' : 'UPDATE NOW'}
                                             </button>
                                         </div>
                                     ) : (

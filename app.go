@@ -299,7 +299,7 @@ type UpdateResult struct {
 	Error           string `json:"error,omitempty"`
 }
 
-const CurrentAppVersion = "v1.0.4"
+const CurrentAppVersion = "v1.0.5"
 
 // CheckForUpdates checks the GitHub repo for a newer version
 func (a *App) CheckForUpdates() UpdateResult {

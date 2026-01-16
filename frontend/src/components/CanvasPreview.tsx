@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { Rnd } from 'react-rnd';
-import { Maximize2, Move, FileText, Loader2, Trash2, Clipboard, Copy, Layers, Plus, Minus } from 'lucide-react';
+import { Maximize2, Move, FileText, Loader2, Trash2, Clipboard, Copy, Layers, Plus, Minus, CheckCircle2 } from 'lucide-react';
 import { Reorder } from 'framer-motion';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -158,7 +158,14 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
     const [pageHeight, setPageHeight] = useState<number>(0);
     const [containerWidth, setContainerWidth] = useState<number>(0);
     const [zoom, setZoom] = useState(1.0);
+    // renderedZoom is the zoom level at which the PDF was last rendered
+    const [renderedZoom, setRenderedZoom] = useState(1.0);
+    // renderedBrowserScale is the browser scale at which the PDF was last rendered
+    const [renderedBrowserScale, setRenderedBrowserScale] = useState(1.0); 
+
     const [loading, setLoading] = useState(false);
+    const [isZooming, setIsZooming] = useState(false);
+    const zoomTimeoutRef = useRef<any>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -168,19 +175,27 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
     const [sidebarWidth, setSidebarWidth] = useState(200);
     const isResizingRef = useRef(false);
 
-    // Sync Sidebar Scroll
+    // Sync Sidebar Scroll & Selection
     useEffect(() => {
         if (activePage > 0) {
+            // Scroll sidebar thumbnail into view
             const thumb = thumbRefs.current[activePage - 1];
             if (thumb) {
+                // Use 'nearest' to avoid unnecessary jumping if already in view
                 thumb.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
+
+            // Sync Selection with Scroll? 
+            // NO, per user request: Blue highlight tracks ACTIVE view.
+            // Selection is separate (Checkboxes).
+            // So we do NOT update selectedPages on scroll. 
         }
     }, [activePage]);
 
     // Context Menu State
     const [menu, setMenu] = useState<{ x: number, y: number, pageNum: number } | null>(null);
-    const [copiedPage, setCopiedPage] = useState<number | null>(null);
+    const [copiedPages, setCopiedPages] = useState<number[]>([]);
+    const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set());
 
     // Reorder State
     const [pageOrder, setPageOrder] = useState<number[]>([]);
@@ -239,11 +254,26 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
 
     useEffect(() => {
         const handleResize = () => {
+             // We just update container width immediately for visual calc
             if (containerRef.current) setContainerWidth(containerRef.current.offsetWidth);
         };
+        // Initial set
         handleResize();
+        
+        // Add ResizeObserver specifically for container size changes (like sidebar resize)
+        const resizeObserver = new ResizeObserver(() => {
+             handleResize();
+        });
+        
+        if (containerRef.current) {
+            resizeObserver.observe(containerRef.current);
+        }
+
         window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
+        return () => {
+             window.removeEventListener('resize', handleResize);
+             resizeObserver.disconnect();
+        };
     }, []);
 
     // Sidebar resize handlers
@@ -310,14 +340,23 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
                 const mouseYInDoc = e.clientY - docRect.top;
 
                 // Normalize delta for different input devices
-                const delta = -e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.002);
+                // Using a logarithmic scale factor for smoother, more natural zoom
+                const delta = -e.deltaY * 0.0015;
+                const factor = Math.pow(1.1, delta);
                 const currentZoom = zoomRef.current;
-                const newZoom = Math.min(Math.max(currentZoom + (currentZoom * delta), 0.4), 4.0);
+                const newZoom = Math.min(Math.max(currentZoom * factor, 0.4), 4.0);
 
                 if (newZoom !== currentZoom) {
                     const ratio = newZoom / currentZoom;
                     setZoom(newZoom);
                     zoomRef.current = newZoom; // Immediate update
+
+                    setIsZooming(true);
+                    if (zoomTimeoutRef.current) clearTimeout(zoomTimeoutRef.current);
+                    zoomTimeoutRef.current = setTimeout(() => {
+                        setRenderedZoom(newZoom);
+                        setIsZooming(false);
+                    }, 500);
 
                     container.scrollLeft += mouseXInDoc * (ratio - 1);
                     container.scrollTop += mouseYInDoc * (ratio - 1);
@@ -343,6 +382,13 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
                 setZoom(newZoom);
                 zoomRef.current = newZoom; // Immediate update
 
+                setIsZooming(true);
+                if (zoomTimeoutRef.current) clearTimeout(zoomTimeoutRef.current);
+                zoomTimeoutRef.current = setTimeout(() => {
+                    setRenderedZoom(newZoom);
+                    setIsZooming(false);
+                }, 500);
+
                 const docRect = doc.getBoundingClientRect();
                 const mouseXInDoc = e.clientX - docRect.left;
                 const mouseYInDoc = e.clientY - docRect.top;
@@ -367,8 +413,37 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
         };
     }, [loading, pdfData]);
 
+    // Current Target Scale (what we want to see)
     const browserScale = (containerWidth && pageWidth) ? (containerWidth - sidebarWidth - 60) / pageWidth : 1;
     const effectiveScale = browserScale * zoom;
+
+    // We detect when browserScale changes significantly (sidebar resize or window resize)
+    // AND DEBOUNCE rendering the PDF at that new scale.
+    useEffect(() => {
+        // If we have no rendered scale yet, set it immediately
+        if (renderedBrowserScale === 1.0 && browserScale !== 1.0) {
+            setRenderedBrowserScale(browserScale);
+            return;
+        }
+
+        if (browserScale !== renderedBrowserScale) {
+            setIsZooming(true); // Treat as zooming (visual scale only)
+            
+            if (zoomTimeoutRef.current) clearTimeout(zoomTimeoutRef.current);
+            zoomTimeoutRef.current = setTimeout(() => {
+                setRenderedBrowserScale(browserScale);
+                setIsZooming(false);
+            }, 500); // 500ms debounce
+        }
+    }, [browserScale]); // We intentionally do NOT include renderedBrowserScale in deps to avoid loops, though logic handles it.
+
+    // The scale used for the ACTUAL <Page /> component.
+    // It only updates when we commit the zoom or browser scale.
+    const finalRenderedScale = renderedBrowserScale * renderedZoom;
+
+    // Visual Scale Factor for CSS Transform
+    // effectiveScale (Target) / finalRenderedScale (Current Texture)
+    const cssScale = effectiveScale / finalRenderedScale;
 
     const handleManualZoom = (delta: number) => {
         const container = scrollRef.current;
@@ -386,6 +461,20 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
 
             setZoom(newZoom);
             zoomRef.current = newZoom;
+            // For manual buttons, we want instant crisp render usually, 
+            // but consistency is better. Let the effect handle render update.
+            // But to avoid blur on button click, maybe we update immediately?
+            // Let's stick to the debounce pattern for consistency or users might see blink.
+            // setRenderedZoom(newZoom); <-- Removed to use debounce path
+            
+            // Actually manual click is distinct, let's force it for better UX?
+            // No, consistency prevents blinking.
+             setIsZooming(true);
+             if (zoomTimeoutRef.current) clearTimeout(zoomTimeoutRef.current);
+             zoomTimeoutRef.current = setTimeout(() => {
+                 setRenderedZoom(newZoom);
+                 setIsZooming(false);
+             }, 500);
 
             container.scrollLeft = centerX * ratio - container.clientWidth / 2;
             container.scrollTop = centerY * ratio - container.clientHeight / 2;
@@ -456,38 +545,75 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
     // Keyboard Shortcuts for Page Manipulation
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            const isMod = e.metaKey || e.ctrlKey;
             if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-
             // Only handle page shortcuts if NO stamp is selected
             if (activeStampId) return;
 
-            if (isMod && (e.key === 'c' || e.code === 'KeyC')) {
-                performPageAction('copy', activePage);
-                e.preventDefault();
-            }
+            const isMod = e.metaKey || e.ctrlKey;
 
-            if (isMod && (e.key === 'v' || e.code === 'KeyV')) {
-                if (copiedPage !== null) {
-                    performPageAction('paste', activePage);
+            if (isMod && (e.key === 'c' || e.code === 'KeyC')) {
+                if (selectedPages.size > 0) {
+                    performPageAction('copy');
                     e.preventDefault();
                 }
             }
 
-            if ((e.code === 'Delete' || e.code === 'Backspace')) {
-                // For now, let's keep delete to right-click only to avoid accidental deletions of pages
-                // unless we want it. User explicitly asked for copy/paste.
+            if (isMod && (e.key === 'v' || e.code === 'KeyV')) {
+                if (copiedPages.length > 0) {
+                    performPageAction('paste');
+                    e.preventDefault();
+                }
+            }
+
+            if ((e.key === 'Delete' || e.key === 'Backspace')) {
+                 if (selectedPages.size > 0) {
+                     performPageAction('delete');
+                     e.preventDefault();
+                 }
             }
         };
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [activePage, activeStampId, copiedPage, numPages]);
+    }, [activePage, activeStampId, copiedPages, selectedPages, numPages]);
+
+    // Sidebar Click Handler
+    const handleSidebarClick = (e: React.MouseEvent, pNum: number, index: number) => {
+        if (e.shiftKey) {
+            // Toggle selection (Checkboxes)
+            const newSet = new Set(selectedPages);
+            if (newSet.has(pNum)) {
+                newSet.delete(pNum);
+            } else {
+                newSet.add(pNum);
+            }
+            setSelectedPages(newSet);
+        } else {
+            // Standard click: Navigation + Set as Active
+            // Does NOT select (check) the page unless CMD is held?
+            // Actually, usually click = jump to page.
+            scrollToPage(index);
+            // We can optionally clear selection on simple click?
+            // setSelectedPages(new Set()); 
+        }
+    };
 
     // Page Actions
-    const performPageAction = (type: 'delete' | 'duplicate' | 'copy' | 'paste', targetPage: number) => {
+    const performPageAction = (type: 'delete' | 'duplicate' | 'copy' | 'paste', targetPageOverride?: number) => {
+        // Determine the target pages: either the specific override (from right click on non-selected) or the selection set
+        let targets = new Set(selectedPages);
+        
+        // If context menu was opened on a page not in selection, select only that page
+        if (targetPageOverride && !selectedPages.has(targetPageOverride) && type !== 'paste') {
+           targets = new Set([targetPageOverride]);
+           setSelectedPages(targets);
+        }
+        
+        // If nothing selected and no override (e.g. keyboard shortcut with empty selection), use active page or return?
+        // Current UX: keyboard only works if selection exists. 
+
         if (type === 'copy') {
-            setCopiedPage(targetPage);
+            setCopiedPages(Array.from(targets));
             return;
         }
 
@@ -495,17 +621,30 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
         let newOrder: number[] = [];
 
         if (type === 'delete') {
-            newOrder = currentOrder.filter(p => p !== targetPage);
+            newOrder = currentOrder.filter(p => !targets.has(p));
+            // Should clear selection after delete
+            setSelectedPages(new Set());
         } else if (type === 'duplicate') {
             currentOrder.forEach(p => {
                 newOrder.push(p);
-                if (p === targetPage) newOrder.push(p);
+                if (targets.has(p)) {
+                     // Find how many times this page is in targets (actually set has unique)
+                     // Duplicate it once.
+                     newOrder.push(p);
+                }
             });
-        } else if (type === 'paste' && copiedPage !== null) {
-            currentOrder.forEach(p => {
+        } else if (type === 'paste') {
+             // Paste after the LAST target page, or active page if no targets?
+             // Usually paste adds after the "focused" item.
+             // We'll insert after the last page in the targets list, or activePage.
+             const insertAfter = targetPageOverride || Array.from(targets).pop() || activePage;
+             
+             currentOrder.forEach(p => {
                 newOrder.push(p);
-                if (p === targetPage) newOrder.push(copiedPage);
-            });
+                if (p === insertAfter) {
+                    copiedPages.forEach(cp => newOrder.push(cp));
+                }
+             });
         }
 
         if (newOrder.length > 0) onUpdatePages(newOrder);
@@ -556,9 +695,18 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
                         <div
                             ref={scrollRef}
                             className="flex-1 overflow-auto overscroll-none py-16 flex flex-col items-center custom-scrollbar bg-[var(--bg-main)]"
-                            onClick={() => { onSelectStamp(null); setMenu(null); }}
+                            onClick={() => { 
+                                onSelectStamp(null); 
+                                setMenu(null);
+                                // Optional: Clicking empty space clears page selection? 
+                                // sticky selection is usually better for pro apps.
+                            }}
                         >
-                            <div className="pdf-document-container flex-shrink-0" style={{ width: pageWidth * effectiveScale }}>
+                            <div className="pdf-document-container flex-shrink-0 origin-top" style={{
+                                width: pageWidth * effectiveScale, // Maintains layout space
+                                transform: `scale(${cssScale})`, // Visual scale
+                                transformOrigin: 'top left' 
+                            }}>
                                 <Document
                                     file={pdfData}
                                     onLoadSuccess={onDocumentLoadSuccess}
@@ -570,22 +718,31 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
                                             key={`page_${index + 1}`}
                                             ref={el => pageRefs.current[index] = el}
                                             data-page-index={index}
-                                            className="relative shadow-[var(--shadow-soft)] border border-[var(--border-main)] bg-white w-fit mx-auto"
+                                            className="relative shadow-[var(--shadow-soft)] border border-[var(--border-main)] bg-white w-fit mx-auto transition-none"
+                                            style={{
+                                                width: pageWidth * finalRenderedScale,
+                                                height: pageHeight * finalRenderedScale,
+                                                // We must counter-scale the individual pages? 
+                                                // No, the container is scaled.
+                                                // Wait, if container is scaled by cssScale, then the inner Page (rendered at finalRenderedScale)
+                                                // will appear at size: finalRenderedScale * cssScale = effectiveScale. Correct.
+                                            }}
                                         >
                                             <Page
                                                 pageNumber={index + 1}
-                                                width={pageWidth > 0 ? pageWidth * effectiveScale : 600}
+                                                width={pageWidth > 0 ? pageWidth * finalRenderedScale : 600}
                                                 onLoadSuccess={index === 0 ? onPageLoadSuccess : undefined}
                                                 renderAnnotationLayer={false}
                                                 renderTextLayer={false}
                                                 loading={null}
                                                 className="block"
+                                                devicePixelRatio={Math.max(window.devicePixelRatio || 1, 2)}
                                             />
                                             {pageWidth > 0 && stamps.filter(s => s.pageNum === index + 1).map(stamp => (
                                                 <DraggableStamp
                                                     key={stamp.id}
                                                     stamp={stamp}
-                                                    scale={effectiveScale}
+                                                    scale={finalRenderedScale}
                                                     isSelected={stamp.id === activeStampId}
                                                     onSelect={() => onSelectStamp(stamp.id)}
                                                     onUpdate={onUpdateStamp}
@@ -627,7 +784,9 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
                         >
                             {pageOrder.map((pNum, index) => {
                                 const visualPageNum = index + 1;
-                                const isCurrent = visualPageNum === activePage;
+                                const isVisible = visualPageNum === activePage;
+                                const isSelected = selectedPages.has(pNum);
+
                                 return (
                                     <Reorder.Item
                                         key={pNum}
@@ -641,30 +800,39 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
                                                 onUpdatePages(pageOrder);
                                             }
                                         }}
-                                        onClick={() => scrollToPage(index)}
+                                        onClick={(e) => handleSidebarClick(e, pNum, index)}
                                         onContextMenu={(e) => {
                                             e.preventDefault();
+                                            if (!isSelected) {
+                                                setSelectedPages(new Set([pNum]));
+                                                scrollToPage(index);
+                                            }
                                             setMenu({ x: e.clientX, y: e.clientY, pageNum: pNum });
                                         }}
                                         className="group relative cursor-pointer"
                                     >
-                                        <div className={`relative bg-[var(--bg-card)] rounded-2xl border-2 transition-all duration-300 shadow-2xl overflow-hidden flex items-center justify-center min-h-[80px] ${isCurrent ? 'border-[var(--accent)] ring-4 ring-[var(--accent)]/30' : 'border-[var(--border-main)] hover:border-blue-400/50 dark:hover:border-indigo-500/50'}`}>
+                                        <div className={`relative bg-[var(--bg-card)] rounded-2xl border-2 transition-all duration-300 shadow-2xl overflow-hidden flex items-center justify-center min-h-[80px] ${isVisible ? 'border-[var(--accent)] ring-4 ring-[var(--accent)]/20' : 'border-[var(--border-main)] hover:border-blue-400/50 dark:hover:border-indigo-500/50'}`}>
                                             <Document file={pdfData} loading={null}>
                                                 <Page pageNumber={pNum} width={sidebarWidth - 60} renderAnnotationLayer={false} renderTextLayer={false} loading={null} />
                                             </Document>
 
-                                            {/* Selection Glow Overlay */}
-                                            <div className={`absolute inset-0 transition-opacity duration-300 ${isCurrent ? 'bg-[var(--accent)]/10' : 'bg-transparent group-hover:bg-[var(--bg-hover)]'}`} />
-
-                                            {/* Active Indicator Bar */}
-                                            {isCurrent && (
-                                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-[var(--accent)] shadow-[0_0_15px_var(--accent-glow)]" />
+                                            {/* Selection Overlay (Check) */}
+                                            {isSelected && (
+                                                <div className="absolute inset-0 bg-indigo-500/10 border-2 border-indigo-500 z-10 pointer-events-none rounded-xl" />
                                             )}
                                         </div>
 
-                                        <div className={`absolute top-2 right-2 w-6 h-6 bg-[var(--accent)] backdrop-blur rounded-lg flex items-center justify-center text-[9px] font-black text-white transition-all border border-white/20 shadow-lg ${isCurrent ? 'opacity-100 scale-110' : 'opacity-0 group-hover:opacity-100 group-hover:bg-black/50'}`}>
+                                        {/* Page Number Badge */}
+                                        <div className={`absolute top-2 right-2 w-6 h-6 backdrop-blur rounded-lg flex items-center justify-center text-[9px] font-black transition-all border shadow-lg z-20 ${isVisible ? 'bg-[var(--accent)] text-white border-white/20' : 'bg-black/50 text-white border-white/10'}`}>
                                             {pNum}
                                         </div>
+
+                                        {/* Selection Checkbox */}
+                                        {isSelected && (
+                                            <div className="absolute top-2 left-2 w-5 h-5 bg-indigo-500 rounded-md flex items-center justify-center shadow-lg z-20 animate-in zoom-in spin-in-90 duration-200">
+                                                <CheckCircle2 size={12} className="text-white" strokeWidth={3} />
+                                            </div>
+                                        )}
 
                                         {/* Drag Handle Overlay */}
                                         <div className="absolute inset-0 flex items-center justify-center bg-indigo-500/0 group-active:bg-indigo-500/10 transition-colors pointer-events-none rounded-2xl" />
@@ -680,10 +848,10 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
                             y={menu.y}
                             onClose={() => setMenu(null)}
                             options={[
-                                { label: 'Copy Page', icon: <Copy size={14} />, onClick: () => performPageAction('copy', menu.pageNum) },
+                                { label: `Copy ${selectedPages.size > 1 ? `(${selectedPages.size})` : ''}`, icon: <Copy size={14} />, onClick: () => performPageAction('copy', menu.pageNum) },
                                 { label: 'Paste Page After', icon: <Clipboard size={14} />, onClick: () => performPageAction('paste', menu.pageNum) },
-                                { label: 'Duplicate', icon: <Layers size={14} />, onClick: () => performPageAction('duplicate', menu.pageNum) },
-                                { label: 'Delete Page', destructive: true, icon: <Trash2 size={14} />, onClick: () => performPageAction('delete', menu.pageNum) },
+                                { label: `Duplicate ${selectedPages.size > 1 ? `(${selectedPages.size})` : ''}`, icon: <Layers size={14} />, onClick: () => performPageAction('duplicate', menu.pageNum) },
+                                { label: `Delete ${selectedPages.size > 1 ? `(${selectedPages.size})` : ''}`, destructive: true, icon: <Trash2 size={14} />, onClick: () => performPageAction('delete', menu.pageNum) },
                             ]}
                         />
                     )}

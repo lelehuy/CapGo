@@ -25,7 +25,8 @@ import {
     Sun,
     Moon,
     FolderOpen,
-    ExternalLink
+    ExternalLink,
+    RefreshCw
 } from 'lucide-react';
 import { SelectFiles, SelectFile, StampPDF, GetFile, CheckForUpdates, BrowserOpenURL, DownloadUpdate, InstallUpdate } from '../wailsjs/go/main/App';
 import { OnFileDrop, OnFileDropOff, LogInfo } from '../wailsjs/runtime/runtime';
@@ -664,8 +665,21 @@ function App() {
 
 
     const [isUpdating, setIsUpdating] = useState(false);
+    const [readyUpdatePath, setReadyUpdatePath] = useState<string | null>(null);
 
     const handleUpdate = async () => {
+        // If update is already downloaded, just install/restart
+        if (readyUpdatePath) {
+            try {
+                notify('info', 'Restarting application...');
+                // @ts-ignore
+                await window.go.main.App.InstallUpdate(readyUpdatePath);
+            } catch (err) {
+                notify('error', 'Failed to restart: ' + err);
+            }
+            return;
+        }
+
         if (!updateResult || !updateResult.downloadUrl) {
             // Fallback
             BrowserOpenURL("https://github.com/lelehuy/CapGo/releases");
@@ -677,9 +691,8 @@ function App() {
             notify('info', 'Downloading update...');
             // @ts-ignore
             const path = await window.go.main.App.DownloadUpdate(updateResult.downloadUrl);
-            notify('success', 'Download complete. Restarting app...');
-            // @ts-ignore
-            await window.go.main.App.InstallUpdate(path);
+            setReadyUpdatePath(path);
+            notify('success', 'Download complete. Click restart to apply.');
             setIsUpdating(false);
         } catch (err) {
             console.error("Update failed:", err);
@@ -1062,10 +1075,10 @@ function App() {
                                             <button
                                                 onClick={handleUpdate}
                                                 disabled={isUpdating}
-                                                className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                className={`w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${readyUpdatePath ? 'animate-pulse' : ''}`}
                                             >
-                                                {isUpdating ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} 
-                                                {isUpdating ? 'DOWNLOADING...' : 'UPDATE NOW'}
+                                                {isUpdating ? <Loader2 size={12} className="animate-spin" /> : (readyUpdatePath ? <RefreshCw size={12} /> : <Download size={12} />)} 
+                                                {isUpdating ? 'DOWNLOADING...' : (readyUpdatePath ? 'RESTART & INSTALL' : 'UPDATE NOW')}
                                             </button>
                                         </div>
                                     ) : (

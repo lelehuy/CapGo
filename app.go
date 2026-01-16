@@ -306,7 +306,7 @@ type UpdateResult struct {
 	DownloadUrl     string `json:"downloadUrl"`
 }
 
-const CurrentAppVersion = "v1.0.5"
+const CurrentAppVersion = "v1.0.6"
 
 // CheckForUpdates checks the GitHub repo for a newer version
 func (a *App) CheckForUpdates() UpdateResult {

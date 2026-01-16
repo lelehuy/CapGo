@@ -1031,7 +1031,7 @@ function App() {
                             </div>
 
                             <h2 className="text-2xl font-black uppercase tracking-widest text-white mb-1">CapGo</h2>
-                            <p className="text-zinc-500 text-xs font-mono mb-8">Version 1.0.5-production</p>
+                            <p className="text-zinc-500 text-xs font-mono mb-8">Version 1.0.6-production</p>
 
                             {!updateResult ? (
                                 <button
@@ -1161,7 +1161,7 @@ function App() {
                                 </div>
 
                                 <div className="pt-4 border-t border-[var(--border-main)]">
-                                    <p className="text-[10px] text-[var(--text-muted)] font-mono">Build Version: 1.0.5-production</p>
+                                    <p className="text-[10px] text-[var(--text-muted)] font-mono">Build Version: 1.0.6-production</p>
                                 </div>
                             </div>
 
@@ -1180,9 +1180,9 @@ function App() {
                 {notifications.map(n => (
                     <div
                         key={n.id}
-                        className={`px-5 py-3.5 rounded-2xl shadow-2xl backdrop-blur-xl border border-white/10 flex items-center gap-3 animate-in slide-in-from-right-10 fade-in duration-300 pointer-events-auto ${n.type === 'success' ? 'bg-emerald-500/10 text-[var(--success-pastel)]' :
-                            n.type === 'error' ? 'bg-red-500/10 text-red-400' :
-                                'bg-indigo-500/10 text-indigo-400'
+                        className={`px-5 py-3.5 rounded-2xl shadow-[var(--shadow-soft)] backdrop-blur-xl border flex items-center gap-3 animate-in slide-in-from-right-10 fade-in duration-300 pointer-events-auto ${n.type === 'success' ? 'bg-emerald-600/90 dark:bg-emerald-500/90 text-white border-emerald-400/30' :
+                            n.type === 'error' ? 'bg-red-600/90 dark:bg-red-500/90 text-white border-red-400/30' :
+                                'bg-indigo-600/90 dark:bg-indigo-500/90 text-white border-indigo-400/30'
                             }`}
                     >
                         {n.type === 'success' && <CheckCircle2 size={18} />}

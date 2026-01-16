@@ -4,9 +4,13 @@
 [![macOS Support](https://img.shields.io/badge/Platform-macOS-lightgrey.svg?logo=apple)](https://github.com/Lelehuy/CapGo/releases)
 [![Downloads](https://img.shields.io/github/downloads/Lelehuy/CapGo/total?color=brightgreen)](https://github.com/Lelehuy/CapGo/releases)
 
-**CapGo** is a fast, modern, and beautiful desktop application for macOS designed to help you stamp and sign PDF documents with zero effort. 
+**CapGo** is a fast, modern, and beautiful desktop application for macOS designed to help you stamp and sign PDF documents with zero effort.
 
 Whether you're a professional handling hundreds of invoices or just need to sign a quick form, CapGo makes the process seamless, secure, and satisfying.
+
+---
+
+![CapGo Application Screenshot](screenshots/app_screenshot.png)
 
 ---
 
@@ -43,6 +47,7 @@ Ready to start stamping? Download the latest version for macOS:
 ## 🔄 Stay Updated
 
 CapGo is constantly improving. To check for the latest features:
+
 - Click the **CapGo** title in the app to see the "About" section.
 - Use the **"Check for Update"** button to automatically download the newest version.
 
@@ -50,11 +55,11 @@ CapGo is constantly improving. To check for the latest features:
 
 ## 📄 License & Privacy
 
-CapGo is **Open Source** software licensed under the [GNU General Public License v3.0](LICENSE). 
+CapGo is **Open Source** software licensed under the [GNU General Public License v3.0](LICENSE).
 Your privacy is our priority: Your files are processed locally and are never uploaded to any server.
 
 ---
 
-*Developed with ❤️ for productivity by [Lelehuy](https://github.com/Lelehuy).*
+_Developed with ❤️ for productivity by [Lelehuy](https://github.com/Lelehuy)._
 
 > **Are you a developer?** Check out our [Development Guide](./DEVELOPMENT.md) for build instructions and project structure.
